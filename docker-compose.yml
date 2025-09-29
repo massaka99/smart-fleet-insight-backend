@@ -1,0 +1,39 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./simulator/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend
+    container_name: osrm
+    command: ["osrm-routed", "--algorithm", "mld", "/data/denmark-250924.osrm"]
+    volumes:
+      - ./simulator/osrm:/data
+    ports:
+      - "5000:5000"
+
+  simulator:
+    build:
+      context: ./simulator
+    container_name: simulator
+    depends_on:
+      - mosquitto
+      - osrm
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_TOPIC: fleet/telemetry
+      OSRM_URL: http://osrm:5000
+      VEHICLE_COUNT: "3"
+      ROUTE_MIN_STOPS: "2"
+      ROUTE_MAX_STOPS: "4"
+    restart: on-failure
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:

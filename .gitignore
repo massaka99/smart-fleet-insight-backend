@@ -1,0 +1,14 @@
+simulator/osrm/
+
+mosquitto-data/
+mosquitto-log/
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.venv/
+.env/
+
+*.log
