@@ -1,0 +1,6 @@
+﻿services:
+  smartfleet:
+    image: smartfleet
+    build:
+      context: .
+      dockerfile: SmartFleet/Dockerfile
