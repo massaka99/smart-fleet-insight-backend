@@ -8,22 +8,22 @@ public static class RolePermissions
     private static readonly IReadOnlyDictionary<UserRole, string[]> Permissions =
         new Dictionary<UserRole, string[]>
         {
-            [UserRole.Chauffoer] = new[]
+            [UserRole.Driver] = new[]
             {
                 "Chat",
-                "Notifikationer",
+                "Notifications",
                 "Maps"
             },
-            [UserRole.Koordinator] = new[]
+            [UserRole.Coordinator] = new[]
             {
                 "Chat",
                 "Dashboard"
             },
-            [UserRole.Chef] = new[]
+            [UserRole.Admin] = new[]
             {
                 "Chat",
                 "Dashboard",
-                "RolleAdministration"
+                "RoleManagement"
             }
         };
 

@@ -16,11 +16,11 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         modelBuilder.Entity<User>().HasData(
             new User
             {
-                Id = 1000,
+                Id = 1,
                 FirstName = "Default",
                 LastName = "Admin",
                 Age = 35,
-                Role = UserRole.Chef,
+                Role = UserRole.Admin,
                 PasswordHash = "AQAAAAIAAYagAAAAEOCJVUh+L5Pygby4OYlYZtLtrN/TrziEgkz6euPJtg4/c5uRcY1y6TrWBJF3+rt5Cg=="
             });
     }

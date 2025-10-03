@@ -2,7 +2,7 @@ namespace SmartFleet.Models;
 
 public enum UserRole
 {
-    Chauffoer = 0,
-    Koordinator = 1,
-    Chef = 2
+    Driver = 0,
+    Coordinator = 1,
+    Admin = 2
 }

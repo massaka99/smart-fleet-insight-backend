@@ -104,12 +104,67 @@ public class UsersController(ApplicationDbContext context, IPasswordHasher<User>
         return Created($"/api/users/{user.Id}", response);
     }
 
+    [HttpPut("{id:int}/role")]
+    [Authorize(Policy = "RoleAdminAccess")]
+    public async Task<ActionResult<UserDetailsResponse>> UpdateUserRole(int id, [FromBody] UpdateUserRoleRequest request, CancellationToken cancellationToken)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        if (user.Role == request.Role)
+        {
+            return Ok(new UserDetailsResponse(
+                user.Id,
+                user.FirstName,
+                user.LastName,
+                user.Age,
+                user.Role,
+                RolePermissions.GetPermissions(user.Role)));
+        }
+
+        user.Role = request.Role;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var response = new UserDetailsResponse(
+            user.Id,
+            user.FirstName,
+            user.LastName,
+            user.Age,
+            user.Role,
+            RolePermissions.GetPermissions(user.Role));
+
+        return Ok(response);
+    }
+
+    [HttpDelete("{id:int}")]
+    [Authorize(Policy = "RoleAdminAccess")]
+    public async Task<IActionResult> DeleteUser(int id, CancellationToken cancellationToken)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        _context.Users.Remove(user);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return NoContent();
+    }
+
     public record CreateUserRequest(
         string FirstName,
         string LastName,
         int Age,
         UserRole Role,
         string Password);
+
+    public record UpdateUserRoleRequest(UserRole Role);
 
     public record UserDetailsResponse(
         int Id,

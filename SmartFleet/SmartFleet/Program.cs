@@ -73,13 +73,13 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("DashboardAccess", policy =>
-        policy.RequireRole(UserRole.Koordinator.ToString(), UserRole.Chef.ToString()));
+        policy.RequireRole(UserRole.Coordinator.ToString(), UserRole.Admin.ToString()));
 
     options.AddPolicy("MapsAccess", policy =>
-        policy.RequireRole(UserRole.Chauffoer.ToString(), UserRole.Chef.ToString()));
+        policy.RequireRole(UserRole.Driver.ToString(), UserRole.Admin.ToString()));
 
     options.AddPolicy("RoleAdminAccess", policy =>
-        policy.RequireRole(UserRole.Chef.ToString()));
+        policy.RequireRole(UserRole.Admin.ToString()));
 });
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
