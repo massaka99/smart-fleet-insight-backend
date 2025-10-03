@@ -41,65 +41,6 @@ public class UsersController(ApplicationDbContext context, IPasswordHasher<User>
         return user is null ? NotFound() : Ok(MapToResponse(user));
     }
 
-    [HttpPost]
-    [Authorize(Policy = "RoleAdminAccess")]
-    public async Task<ActionResult<UserDetailsResponse>> CreateUser([FromBody] CreateUserRequest request, CancellationToken cancellationToken)
-    {
-        var firstName = request.FirstName.Trim();
-        var lastName = request.LastName.Trim();
-        var hasValidEmail = TryNormalizeEmail(request.Email, out var normalizedEmail);
-
-        if (string.IsNullOrWhiteSpace(firstName))
-        {
-            ModelState.AddModelError(nameof(request.FirstName), "First name is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(lastName))
-        {
-            ModelState.AddModelError(nameof(request.LastName), "Last name is required.");
-        }
-
-        if (!hasValidEmail)
-        {
-            ModelState.AddModelError(nameof(request.Email), "A valid email address is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Password))
-        {
-            ModelState.AddModelError(nameof(request.Password), "Password is required.");
-        }
-
-        if (!ModelState.IsValid)
-        {
-            return ValidationProblem(ModelState);
-        }
-
-        var emailInUse = await _context.Users
-            .AsNoTracking()
-            .AnyAsync(u => u.Email == normalizedEmail, cancellationToken);
-
-        if (emailInUse)
-        {
-            return Conflict("Email is already in use.");
-        }
-
-        var user = new User
-        {
-            FirstName = firstName,
-            LastName = lastName,
-            Email = normalizedEmail,
-            ProfileImageUrl = NormalizeOptional(request.ProfileImageUrl),
-            Age = request.Age,
-            Role = request.Role
-        };
-
-        user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
-
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return Created($"/api/users/{user.Id}", MapToResponse(user));
-    }
 
     [HttpPut("{id:int}/role")]
     [Authorize(Policy = "RoleAdminAccess")]
