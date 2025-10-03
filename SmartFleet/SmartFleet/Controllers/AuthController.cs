@@ -1,3 +1,4 @@
+using System.Net.Mail;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -27,15 +28,21 @@ public class AuthController(
     {
         var firstName = request.FirstName.Trim();
         var lastName = request.LastName.Trim();
+        var hasValidEmail = TryNormalizeEmail(request.Email, out var normalizedEmail);
 
         if (string.IsNullOrWhiteSpace(firstName))
         {
-            ModelState.AddModelError(nameof(request.FirstName), "FirstName is required.");
+            ModelState.AddModelError(nameof(request.FirstName), "First name is required.");
         }
 
         if (string.IsNullOrWhiteSpace(lastName))
         {
-            ModelState.AddModelError(nameof(request.LastName), "LastName is required.");
+            ModelState.AddModelError(nameof(request.LastName), "Last name is required.");
+        }
+
+        if (!hasValidEmail)
+        {
+            ModelState.AddModelError(nameof(request.Email), "A valid email address is required.");
         }
 
         if (string.IsNullOrWhiteSpace(request.Password))
@@ -43,24 +50,31 @@ public class AuthController(
             ModelState.AddModelError(nameof(request.Password), "Password is required.");
         }
 
+        if (request.Age <= 0)
+        {
+            ModelState.AddModelError(nameof(request.Age), "Age must be greater than zero.");
+        }
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
         }
 
-        var existingUser = await _context.Users
+        var emailInUse = await _context.Users
             .AsNoTracking()
-            .FirstOrDefaultAsync(u => u.FirstName == firstName && u.LastName == lastName, cancellationToken);
+            .AnyAsync(u => u.Email == normalizedEmail, cancellationToken);
 
-        if (existingUser is not null)
+        if (emailInUse)
         {
-            return Conflict("User already exists.");
+            return Conflict("Email is already in use.");
         }
 
         var user = new User
         {
             FirstName = firstName,
             LastName = lastName,
+            Email = normalizedEmail,
+            ProfileImageUrl = NormalizeOptional(request.ProfileImageUrl),
             Age = request.Age,
             Role = request.Role
         };
@@ -75,6 +89,9 @@ public class AuthController(
             user.Id,
             user.FirstName,
             user.LastName,
+            user.Email,
+            user.ProfileImageUrl,
+            user.Age,
             user.Role,
             RolePermissions.GetPermissions(user.Role),
             token);
@@ -86,11 +103,13 @@ public class AuthController(
     [AllowAnonymous]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
     {
-        var firstName = request.FirstName.Trim();
-        var lastName = request.LastName.Trim();
+        if (!TryNormalizeEmail(request.Email, out var normalizedEmail))
+        {
+            return Unauthorized();
+        }
 
         var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.FirstName == firstName && u.LastName == lastName, cancellationToken);
+            .FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
 
         if (user is null)
         {
@@ -109,10 +128,28 @@ public class AuthController(
             user.Id,
             user.FirstName,
             user.LastName,
+            user.Email,
+            user.ProfileImageUrl,
+            user.Age,
             user.Role,
             RolePermissions.GetPermissions(user.Role),
             token);
 
         return Ok(response);
     }
+
+    private static bool TryNormalizeEmail(string email, out string normalizedEmail)
+    {
+        var trimmed = email.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed) || !MailAddress.TryCreate(trimmed, out _))
+        {
+            normalizedEmail = string.Empty;
+            return false;
+        }
+
+        normalizedEmail = trimmed.ToLowerInvariant();
+        return true;
+    }
+
+    private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
