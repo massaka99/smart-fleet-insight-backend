@@ -162,9 +162,9 @@ public class UsersController(
             return Unauthorized();
         }
 
-        if (string.IsNullOrWhiteSpace(request.CurrentPassword))
+        if (string.IsNullOrWhiteSpace(request.OtpPassword))
         {
-            ModelState.AddModelError(nameof(request.CurrentPassword), "Current password is required.");
+            ModelState.AddModelError(nameof(request.OtpPassword), "Current password is required.");
         }
 
         if (string.IsNullOrWhiteSpace(request.NewPassword))
@@ -184,11 +184,11 @@ public class UsersController(
             return NotFound();
         }
 
-        var verificationResult = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.CurrentPassword);
+        var verificationResult = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.OtpPassword);
 
         if (verificationResult == PasswordVerificationResult.Failed)
         {
-            ModelState.AddModelError(nameof(request.CurrentPassword), "Current password is incorrect.");
+            ModelState.AddModelError(nameof(request.OtpPassword), "Current password is incorrect.");
             return ValidationProblem(ModelState);
         }
 
@@ -271,6 +271,54 @@ public class UsersController(
             _ => BadRequest(new { message = "OTP not found." })
         };
     }
+
+    [HttpPost("reset-password")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryNormalizeEmail(request.Email, out var normalizedEmail))
+        {
+            ModelState.AddModelError(nameof(request.Email), "A valid email address is required.");
+            return ValidationProblem(ModelState);
+        }
+
+        var code = request.OtpPassword?.Trim();
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            ModelState.AddModelError(nameof(request.OtpPassword), "OTP code is required.");
+            return ValidationProblem(ModelState);
+        }
+
+        if (string.IsNullOrWhiteSpace(request.NewPassword))
+        {
+            ModelState.AddModelError(nameof(request.NewPassword), "New password is required.");
+            return ValidationProblem(ModelState);
+        }
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
+
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        var status = _otpService.VerifyOtp(user, code);
+
+        if (status != OtpVerificationStatus.Valid)
+        {
+            return status switch
+            {
+                OtpVerificationStatus.Expired => BadRequest(new { message = "OTP expired." }),
+                OtpVerificationStatus.Invalid => BadRequest(new { message = "OTP invalid." }),
+                _ => BadRequest(new { message = "OTP not found." })
+            };
+        }
+
+        user.PasswordHash = _passwordHasher.HashPassword(user, request.NewPassword);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return Ok(new { message = "Password reset." });
+    }
     private static UserDetailsResponse MapToResponse(User user) => new(
         user.Id,
         user.FirstName,
@@ -312,12 +360,14 @@ public class UsersController(
         string? ProfileImageUrl);
 
     public record UpdateUserPasswordRequest(
-        string CurrentPassword,
+        string OtpPassword,
         string NewPassword);
 
     public record SendOtpRequest(string Email);
 
     public record VerifyOtpRequest(string Email, string Code);
+
+    public record ResetPasswordRequest(string Email, string OtpPassword, string NewPassword);
 
     public record UserDetailsResponse(
         int Id,
@@ -329,5 +379,11 @@ public class UsersController(
         UserRole Role,
         IReadOnlyCollection<string> Permissions);
 }
+
+
+
+
+
+
 
 
