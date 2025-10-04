@@ -45,11 +45,15 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
+builder.Services.AddMemoryCache();
+
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtOptions = jwtSection.Get<JwtOptions>()
                 ?? throw new InvalidOperationException("JWT settings not configured correctly.");
 
 builder.Services.Configure<JwtOptions>(jwtSection);
+builder.Services.Configure<OtpOptions>(builder.Configuration.GetSection("Otp"));
+builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
 
 builder.Services.AddAuthentication(options =>
     {
@@ -90,6 +94,8 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddSingleton<ITokenService, JwtTokenService>();
+builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+builder.Services.AddScoped<IOtpService, OtpService>();
 
 var app = builder.Build();
 
