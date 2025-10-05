@@ -13,6 +13,19 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<Vehicle>(entity =>
+        {
+            entity.Property(v => v.LicensePlate).IsRequired().HasMaxLength(15);
+            entity.Property(v => v.VehicleType).IsRequired().HasMaxLength(100);
+            entity.Property(v => v.FuelType).IsRequired().HasMaxLength(50);
+            entity.Property(v => v.BodyType).HasMaxLength(100);
+
+            entity.HasOne(v => v.Driver)
+                .WithMany()
+                .HasForeignKey(v => v.DriverId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasIndex(u => u.Email).IsUnique();
