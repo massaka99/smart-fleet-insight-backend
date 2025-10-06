@@ -97,6 +97,7 @@ builder.Services.AddScoped<IVehicleService, VehicleService>();
 builder.Services.AddSingleton<ITokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<IOtpService, OtpService>();
+builder.Services.AddScoped<IUserService, UserService>();
 
 var app = builder.Build();
 

@@ -12,4 +12,7 @@ public record LoginResponse(
     int Age,
     UserRole Role,
     IReadOnlyCollection<string> Permissions,
+    bool RequiresPasswordReset,
     string Token);
+
+
