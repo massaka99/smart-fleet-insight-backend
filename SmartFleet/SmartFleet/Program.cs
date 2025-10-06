@@ -53,7 +53,7 @@ var jwtOptions = jwtSection.Get<JwtOptions>()
 
 builder.Services.Configure<JwtOptions>(jwtSection);
 builder.Services.Configure<OtpOptions>(builder.Configuration.GetSection("Otp"));
-builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
+builder.Services.Configure<SendGridOptions>(builder.Configuration.GetSection("SendGrid"));
 
 builder.Services.AddAuthentication(options =>
     {
@@ -95,7 +95,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<IVehicleService, VehicleService>();
 builder.Services.AddSingleton<ITokenService, JwtTokenService>();
-builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+builder.Services.AddScoped<IEmailSender, SendGridEmailSender>();
 builder.Services.AddScoped<IOtpService, OtpService>();
 builder.Services.AddScoped<IUserService, UserService>();
 
@@ -124,3 +124,4 @@ app.MapGet("/health", async (ApplicationDbContext context, CancellationToken can
     .WithOpenApi();
 
 app.Run();
+

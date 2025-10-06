@@ -2,5 +2,5 @@ namespace SmartFleet.Services;
 
 public interface IEmailSender
 {
-    void Send(string toEmail, string subject, string body);
+    Task SendAsync(string toEmail, string templateId, object templateData, CancellationToken cancellationToken);
 }
