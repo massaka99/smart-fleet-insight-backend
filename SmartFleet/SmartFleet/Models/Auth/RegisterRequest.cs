@@ -8,5 +8,5 @@ public record RegisterRequest(
     string Email,
     int Age,
     UserRole Role,
-    string Password,
     string? ProfileImageUrl);
+

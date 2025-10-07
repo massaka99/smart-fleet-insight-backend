@@ -14,6 +14,7 @@ public class OtpService : IOtpService
     private readonly IEmailSender _emailSender;
     private readonly ILogger<OtpService> _logger;
     private readonly OtpOptions _options;
+    private readonly SendGridOptions _sendGridOptions;
 
     private record CacheEntry(string Hash, DateTimeOffset ExpiresAt);
 
@@ -21,15 +22,17 @@ public class OtpService : IOtpService
         IMemoryCache cache,
         IEmailSender emailSender,
         ILogger<OtpService> logger,
-        IOptions<OtpOptions> options)
+        IOptions<OtpOptions> options,
+        IOptions<SendGridOptions> sendGridOptions)
     {
         _cache = cache;
         _emailSender = emailSender;
         _logger = logger;
         _options = options.Value;
+        _sendGridOptions = sendGridOptions.Value;
     }
 
-    public Task<TimeSpan> SendOtpAsync(User user, CancellationToken cancellationToken)
+    public async Task<TimeSpan> SendOtpAsync(User user, CancellationToken cancellationToken)
     {
         var otp = GenerateOtp();
         var hashedOtp = HashOtp(otp);
@@ -38,27 +41,34 @@ public class OtpService : IOtpService
         var cacheEntry = new CacheEntry(hashedOtp, expiresAt);
         _cache.Set(GetCacheKey(user.Id), cacheEntry, expiresAt);
 
-        var body = string.Format(_options.BodyTemplate, otp, _options.ExpiresInMinutes);
-        _emailSender.Send(user.Email, _options.Subject, body);
+        if (string.IsNullOrWhiteSpace(_sendGridOptions.OtpTemplateId))
+        {
+            throw new InvalidOperationException("SendGrid OTP template id must be configured.");
+        }
+
+        var payload = new
+        {
+            first_name = user.FirstName,
+            code = otp,
+            expires_minutes = _options.ExpiresInMinutes,
+            year = DateTime.UtcNow.Year
+        };
+
+        await _emailSender.SendAsync(user.Email, _sendGridOptions.OtpTemplateId, payload, cancellationToken);
 
         _logger.LogInformation("OTP sent for user {UserId} and expires at {ExpiresAt}", user.Id, expiresAt);
 
-        return Task.FromResult(TimeSpan.FromMinutes(_options.ExpiresInMinutes));
+        return TimeSpan.FromMinutes(_options.ExpiresInMinutes);
     }
 
     public OtpVerificationStatus VerifyOtp(User user, string otp)
     {
         var cacheKey = GetCacheKey(user.Id);
 
-        if (!_cache.TryGetValue(cacheKey, out CacheEntry? entry))
+        if (!_cache.TryGetValue(cacheKey, out CacheEntry? entry) || entry is null)
         {
             return OtpVerificationStatus.NotFound;
         }
-        if (entry is null)
-        {
-            return OtpVerificationStatus.NotFound;
-        }
-
 
         if (entry.ExpiresAt < DateTimeOffset.UtcNow)
         {

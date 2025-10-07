@@ -1,9 +1,10 @@
 using System.Net.Mail;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
+using SmartFleet.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using SmartFleet.Authorization;
 using SmartFleet.Data;
 using SmartFleet.Models;
 using SmartFleet.Models.Auth;
@@ -16,11 +17,13 @@ namespace SmartFleet.Controllers;
 public class AuthController(
     ApplicationDbContext context,
     IPasswordHasher<User> passwordHasher,
-    ITokenService tokenService) : ControllerBase
+    ITokenService tokenService,
+    IOtpService otpService) : ControllerBase
 {
     private readonly ApplicationDbContext _context = context;
     private readonly IPasswordHasher<User> _passwordHasher = passwordHasher;
     private readonly ITokenService _tokenService = tokenService;
+    private readonly IOtpService _otpService = otpService;
 
     [HttpPost("register")]
     [Authorize(Policy = "RoleAdminAccess")]
@@ -43,11 +46,6 @@ public class AuthController(
         if (!hasValidEmail)
         {
             ModelState.AddModelError(nameof(request.Email), "A valid email address is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Password))
-        {
-            ModelState.AddModelError(nameof(request.Password), "Password is required.");
         }
 
         if (request.Age <= 0)
@@ -76,27 +74,27 @@ public class AuthController(
             Email = normalizedEmail,
             ProfileImageUrl = NormalizeOptional(request.ProfileImageUrl),
             Age = request.Age,
-            Role = request.Role
+            Role = request.Role,
+            RequiresPasswordReset = true
         };
 
-        user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
+        var temporaryPassword = Guid.NewGuid().ToString("N");
+        user.PasswordHash = _passwordHasher.HashPassword(user, temporaryPassword);
 
         _context.Users.Add(user);
         await _context.SaveChangesAsync(cancellationToken);
 
-        var token = _tokenService.GenerateToken(user);
-        var response = new LoginResponse(
-            user.Id,
-            user.FirstName,
-            user.LastName,
-            user.Email,
-            user.ProfileImageUrl,
-            user.Age,
-            user.Role,
-            RolePermissions.GetPermissions(user.Role),
-            token);
+        try
+        {
+            await _otpService.SendOtpAsync(user, cancellationToken);
+        }
+        catch
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to send OTP email." });
+        }
 
-        return Created($"/api/users/{user.Id}", response);
+        var token = _tokenService.GenerateToken(user);
+        return Created($"/api/users/{user.Id}", CreateLoginResponse(user, token));
     }
 
     [HttpPost("login")]
@@ -108,12 +106,16 @@ public class AuthController(
             return Unauthorized();
         }
 
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
 
         if (user is null)
         {
             return Unauthorized();
+        }
+
+        if (user.RequiresPasswordReset)
+        {
+            return BadRequest(new { message = "Password reset required. Use OTP login." });
         }
 
         var verificationResult = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
@@ -124,19 +126,94 @@ public class AuthController(
         }
 
         var token = _tokenService.GenerateToken(user);
-        var response = new LoginResponse(
-            user.Id,
-            user.FirstName,
-            user.LastName,
-            user.Email,
-            user.ProfileImageUrl,
-            user.Age,
-            user.Role,
-            RolePermissions.GetPermissions(user.Role),
-            token);
-
-        return Ok(response);
+        return Ok(CreateLoginResponse(user, token));
     }
+
+    [HttpPost("login-otp")]
+    [AllowAnonymous]
+    public async Task<ActionResult<LoginResponse>> LoginWithOtp([FromBody] OtpLoginRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryNormalizeEmail(request.Email, out var normalizedEmail))
+        {
+            return Unauthorized();
+        }
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
+
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        var otpCode = request.OtpPassword?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(otpCode))
+        {
+            ModelState.AddModelError(nameof(request.OtpPassword), "OTP code is required.");
+            return ValidationProblem(ModelState);
+        }
+
+        var status = _otpService.VerifyOtp(user, otpCode);
+
+        if (status != OtpVerificationStatus.Valid)
+        {
+            return status switch
+            {
+                OtpVerificationStatus.Expired => BadRequest(new { message = "OTP expired." }),
+                OtpVerificationStatus.Invalid => BadRequest(new { message = "OTP invalid." }),
+                _ => BadRequest(new { message = "OTP not found." })
+            };
+        }
+
+        var token = _tokenService.GenerateToken(user);
+        return Ok(CreateLoginResponse(user, token));
+    }
+
+    [HttpPost("set-password")]
+    [Authorize]
+    public async Task<ActionResult<LoginResponse>> SetPassword([FromBody] SetPasswordRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var userId))
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(request.NewPassword))
+        {
+            ModelState.AddModelError(nameof(request.NewPassword), "New password is required.");
+            return ValidationProblem(ModelState);
+        }
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!user.RequiresPasswordReset)
+        {
+            return BadRequest(new { message = "Password is already set." });
+        }
+
+        user.PasswordHash = _passwordHasher.HashPassword(user, request.NewPassword);
+        user.RequiresPasswordReset = false;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var token = _tokenService.GenerateToken(user);
+        return Ok(CreateLoginResponse(user, token));
+    }
+
+    private static LoginResponse CreateLoginResponse(User user, string token) => new(
+        user.Id,
+        user.FirstName,
+        user.LastName,
+        user.Email,
+        user.ProfileImageUrl,
+        user.Age,
+        user.Role,
+        RolePermissions.GetPermissions(user.Role),
+        user.RequiresPasswordReset,
+        token);
 
     private static bool TryNormalizeEmail(string email, out string normalizedEmail)
     {
@@ -152,4 +229,16 @@ public class AuthController(
     }
 
     private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private bool TryGetUserId(out int userId)
+    {
+        var claim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return int.TryParse(claim, out userId);
+    }
 }
+
+
+
+
+
+

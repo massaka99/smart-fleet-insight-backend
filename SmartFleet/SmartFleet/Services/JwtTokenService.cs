@@ -22,7 +22,8 @@ public class JwtTokenService(IOptions<JwtOptions> options) : ITokenService
             new(JwtRegisteredClaimNames.FamilyName, user.LastName),
             new(JwtRegisteredClaimNames.Email, user.Email),
             new(ClaimTypes.Email, user.Email),
-            new(ClaimTypes.Role, user.Role.ToString())
+            new(ClaimTypes.Role, user.Role.ToString()),
+            new("requiresPasswordReset", user.RequiresPasswordReset ? "true" : "false")
         };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.Key));
@@ -38,3 +39,4 @@ public class JwtTokenService(IOptions<JwtOptions> options) : ITokenService
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 }
+
