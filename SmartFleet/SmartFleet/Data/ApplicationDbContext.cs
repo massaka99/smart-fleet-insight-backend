@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SmartFleet.Models;
+using SmartFleet.Models.Chat;
 
 namespace SmartFleet.Data;
 
@@ -8,6 +9,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 {
     public DbSet<Vehicle> Vehicles => Set<Vehicle>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<ChatThread> ChatThreads => Set<ChatThread>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -24,6 +27,50 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 .WithMany()
                 .HasForeignKey(v => v.DriverId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ChatThread>(entity =>
+        {
+            entity.HasIndex(t => new { t.ParticipantAId, t.ParticipantBId }).IsUnique();
+
+            entity.HasOne(t => t.ParticipantA)
+                .WithMany()
+                .HasForeignKey(t => t.ParticipantAId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(t => t.ParticipantB)
+                .WithMany()
+                .HasForeignKey(t => t.ParticipantBId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ChatMessage>(entity =>
+        {
+            entity.Property(m => m.Body).IsRequired().HasMaxLength(4000);
+            entity.Property(m => m.Status)
+                .IsRequired()
+                .HasConversion<string>()
+                .HasMaxLength(16);
+            entity.Property(m => m.FailureReason).HasMaxLength(1024);
+
+            entity.HasOne(m => m.Thread)
+                .WithMany(t => t.Messages)
+                .HasForeignKey(m => m.ThreadId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(m => m.Sender)
+                .WithMany()
+                .HasForeignKey(m => m.SenderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(m => m.Recipient)
+                .WithMany()
+                .HasForeignKey(m => m.RecipientId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(m => m.ThreadId);
+            entity.HasIndex(m => m.SenderId);
+            entity.HasIndex(m => m.RecipientId);
         });
 
         modelBuilder.Entity<User>(entity =>
