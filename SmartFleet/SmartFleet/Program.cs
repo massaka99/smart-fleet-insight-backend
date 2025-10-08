@@ -8,6 +8,7 @@ using Microsoft.OpenApi.Models;
 using SmartFleet.Authorization;
 using SmartFleet.Data;
 using SmartFleet.Models;
+using SmartFleet.Hubs;
 using SmartFleet.Options;
 using SmartFleet.Services;
 
@@ -18,6 +19,7 @@ builder.Services.AddControllers()
     {
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
+builder.Services.AddSignalR();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -93,6 +95,8 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+builder.Services.AddScoped<IChatService, ChatService>();
+builder.Services.AddScoped<IChatNotifier, SignalRChatNotifier>();
 builder.Services.AddScoped<IVehicleService, VehicleService>();
 builder.Services.AddSingleton<ITokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailSender, SendGridEmailSender>();
@@ -114,6 +118,8 @@ app.UseAuthorization();
 
 app.MapControllers();
 
+app.MapHub<ChatHub>("/hubs/chat");
+
 app.MapGet("/health", async (ApplicationDbContext context, CancellationToken cancellationToken) =>
     {
         var canConnect = await context.Database.CanConnectAsync(cancellationToken);
@@ -124,4 +130,9 @@ app.MapGet("/health", async (ApplicationDbContext context, CancellationToken can
     .WithOpenApi();
 
 app.Run();
+
+
+
+
+
 
