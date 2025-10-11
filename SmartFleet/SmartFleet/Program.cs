@@ -11,6 +11,7 @@ using SmartFleet.Models;
 using SmartFleet.Hubs;
 using SmartFleet.Options;
 using SmartFleet.Services;
+using SmartFleet.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -56,6 +57,33 @@ var jwtOptions = jwtSection.Get<JwtOptions>()
 builder.Services.Configure<JwtOptions>(jwtSection);
 builder.Services.Configure<OtpOptions>(builder.Configuration.GetSection("Otp"));
 builder.Services.Configure<SendGridOptions>(builder.Configuration.GetSection("SendGrid"));
+builder.Services.Configure<MqttOptions>(builder.Configuration.GetSection(MqttOptions.SectionName));
+builder.Services.PostConfigure<MqttOptions>(options =>
+{
+    var host = Environment.GetEnvironmentVariable("MQTT_HOST");
+    if (!string.IsNullOrWhiteSpace(host))
+    {
+        options.Host = host;
+    }
+
+    var portValue = Environment.GetEnvironmentVariable("MQTT_PORT");
+    if (int.TryParse(portValue, out var port))
+    {
+        options.Port = port;
+    }
+
+    var username = Environment.GetEnvironmentVariable("MQTT_USERNAME");
+    if (!string.IsNullOrWhiteSpace(username))
+    {
+        options.Username = username;
+    }
+
+    var password = Environment.GetEnvironmentVariable("MQTT_PASSWORD");
+    if (!string.IsNullOrWhiteSpace(password))
+    {
+        options.Password = password;
+    }
+});
 
 builder.Services.AddAuthentication(options =>
     {
@@ -98,10 +126,17 @@ builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<IChatService, ChatService>();
 builder.Services.AddScoped<IChatNotifier, SignalRChatNotifier>();
 builder.Services.AddScoped<IVehicleService, VehicleService>();
+builder.Services.AddScoped<IVehicleTelemetryService, VehicleTelemetryService>();
 builder.Services.AddSingleton<ITokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailSender, SendGridEmailSender>();
 builder.Services.AddScoped<IOtpService, OtpService>();
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<ITelemetryMessageProcessor, TelemetryMessageProcessor>();
+builder.Services.AddScoped<ITelemetryDeadLetterSink, TelemetryDeadLetterSink>();
+builder.Services.AddSingleton<ITelemetryIngestionMonitor, TelemetryIngestionMonitor>();
+builder.Services.AddSingleton<ITelemetryAnalyticsQueue, TelemetryAnalyticsQueue>();
+builder.Services.AddHostedService<MqttTelemetryHostedService>();
+builder.Services.AddHostedService<TelemetryAnalyticsWorker>();
 
 var app = builder.Build();
 
@@ -119,19 +154,26 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.MapHub<ChatHub>("/hubs/chat");
+app.MapHub<TelemetryHub>("/hubs/telemetry");
 
-app.MapGet("/health", async (ApplicationDbContext context, CancellationToken cancellationToken) =>
+app.MapGet("/health", async (ApplicationDbContext context, ITelemetryIngestionMonitor monitor, CancellationToken cancellationToken) =>
     {
         var canConnect = await context.Database.CanConnectAsync(cancellationToken);
-        return canConnect
-            ? Results.Ok(new { status = "Healthy" })
-            : Results.StatusCode(503);
+        if (!canConnect)
+        {
+            return Results.StatusCode(503);
+        }
+
+        var telemetry = monitor.GetSnapshot();
+        return Results.Ok(new
+        {
+            status = "Healthy",
+            telemetry
+        });
     })
     .WithOpenApi();
 
 app.Run();
-
-
 
 
 

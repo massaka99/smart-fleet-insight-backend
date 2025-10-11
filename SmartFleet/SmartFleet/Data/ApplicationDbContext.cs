@@ -11,6 +11,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<User> Users => Set<User>();
     public DbSet<ChatThread> ChatThreads => Set<ChatThread>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<VehicleState> VehicleStates => Set<VehicleState>();
+    public DbSet<VehicleTelemetryRawMessage> VehicleTelemetryRawMessages => Set<VehicleTelemetryRawMessage>();
+    public DbSet<VehicleTelemetryDeadLetter> VehicleTelemetryDeadLetters => Set<VehicleTelemetryDeadLetter>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -27,6 +30,35 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 .WithMany()
                 .HasForeignKey(v => v.DriverId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<VehicleState>(entity =>
+        {
+            entity.HasIndex(t => t.VehicleId).IsUnique();
+            entity.HasIndex(t => t.NumberPlate);
+            entity.HasIndex(t => t.VehicleCode);
+
+            entity.Property(t => t.TimestampUtc).HasColumnType("timestamp with time zone");
+            entity.Property(t => t.UpdatedAtUtc).HasColumnType("timestamp with time zone");
+
+            entity.HasOne(t => t.Vehicle)
+                .WithMany()
+                .HasForeignKey(t => t.VehicleId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<VehicleTelemetryRawMessage>(entity =>
+        {
+            entity.HasIndex(r => r.TelemetryId);
+            entity.Property(r => r.PayloadJson).HasColumnType("jsonb");
+            entity.Property(r => r.ReceivedAtUtc).HasColumnType("timestamp with time zone");
+        });
+
+        modelBuilder.Entity<VehicleTelemetryDeadLetter>(entity =>
+        {
+            entity.Property(d => d.Reason).HasMaxLength(256);
+            entity.Property(d => d.PayloadJson).HasColumnType("jsonb");
+            entity.Property(d => d.CreatedAtUtc).HasColumnType("timestamp with time zone");
         });
 
         modelBuilder.Entity<ChatThread>(entity =>

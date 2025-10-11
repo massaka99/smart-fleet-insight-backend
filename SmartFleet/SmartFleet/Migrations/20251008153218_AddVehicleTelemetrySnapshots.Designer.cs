@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SmartFleet.Data;
@@ -11,9 +12,11 @@ using SmartFleet.Data;
 namespace SmartFleet.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251008153218_AddVehicleTelemetrySnapshots")]
+    partial class AddVehicleTelemetrySnapshots
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -219,7 +222,7 @@ namespace SmartFleet.Migrations
                     b.ToTable("Vehicles");
                 });
 
-            modelBuilder.Entity("SmartFleet.Models.VehicleState", b =>
+            modelBuilder.Entity("SmartFleet.Models.VehicleTelemetrySnapshot", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -284,6 +287,9 @@ namespace SmartFleet.Migrations
                     b.Property<double>("Progress")
                         .HasColumnType("double precision");
 
+                    b.Property<DateTime>("ReceivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<double>("RouteDistanceKm")
                         .HasColumnType("double precision");
 
@@ -318,9 +324,6 @@ namespace SmartFleet.Migrations
                     b.Property<DateTime>("TimestampUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTime>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("VehicleCode")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -338,58 +341,7 @@ namespace SmartFleet.Migrations
                     b.HasIndex("VehicleId")
                         .IsUnique();
 
-                    b.ToTable("VehicleStates");
-                });
-
-            modelBuilder.Entity("SmartFleet.Models.VehicleTelemetryDeadLetter", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("PayloadJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("VehicleTelemetryDeadLetters");
-                });
-
-            modelBuilder.Entity("SmartFleet.Models.VehicleTelemetryRawMessage", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("PayloadJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
-                    b.Property<DateTime>("ReceivedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("TelemetryId")
-                        .HasMaxLength(36)
-                        .HasColumnType("character varying(36)");
-
-                    b.Property<string>("VehicleCode")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TelemetryId");
-
-                    b.ToTable("VehicleTelemetryRawMessages");
+                    b.ToTable("VehicleTelemetrySnapshots");
                 });
 
             modelBuilder.Entity("SmartFleet.Models.Chat.ChatMessage", b =>
@@ -448,7 +400,7 @@ namespace SmartFleet.Migrations
                     b.Navigation("Driver");
                 });
 
-            modelBuilder.Entity("SmartFleet.Models.VehicleState", b =>
+            modelBuilder.Entity("SmartFleet.Models.VehicleTelemetrySnapshot", b =>
                 {
                     b.HasOne("SmartFleet.Models.Vehicle", "Vehicle")
                         .WithMany()
