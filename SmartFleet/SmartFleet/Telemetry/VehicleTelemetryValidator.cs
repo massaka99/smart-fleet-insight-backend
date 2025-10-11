@@ -56,19 +56,19 @@ public static class VehicleTelemetryValidator
             return false;
         }
 
-        if (DateTimeOffset.TryParseExact(timestampString, "O", CultureInfo.InvariantCulture,
+        if (!DateTimeOffset.TryParse(timestampString, CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed))
         {
-            if (parsed.Offset != TimeSpan.Zero)
-            {
-                error = "timestamp_utc must be expressed in UTC (e.g. end with 'Z').";
-                return false;
-            }
-
-            return true;
+            error = "timestamp_utc is not a valid ISO 8601 timestamp.";
+            return false;
         }
 
-        error = "timestamp_utc is not a valid ISO 8601 UTC timestamp.";
-        return false;
+        if (parsed.Offset != TimeSpan.Zero)
+        {
+            error = "timestamp_utc must be expressed in UTC (e.g. end with 'Z').";
+            return false;
+        }
+
+        return true;
     }
 }

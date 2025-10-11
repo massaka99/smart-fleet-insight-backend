@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SmartFleet")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c59bde34a0e7e43d4c4cdb0b561fb804a1393eb8")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+3468b7a28d539eebc035e285ccaf508bee018248")]
 [assembly: System.Reflection.AssemblyProductAttribute("SmartFleet")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SmartFleet")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
