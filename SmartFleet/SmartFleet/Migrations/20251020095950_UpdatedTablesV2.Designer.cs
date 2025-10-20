@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SmartFleet.Data;
@@ -11,9 +12,11 @@ using SmartFleet.Data;
 namespace SmartFleet.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251020095950_UpdatedTablesV2")]
+    partial class UpdatedTablesV2
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -106,6 +109,131 @@ namespace SmartFleet.Migrations
                     b.ToTable("ChatThreads");
                 });
 
+            modelBuilder.Entity("SmartFleet.Models.Telemetry.VehicleTelemetry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<double>("BaseSpeedKmh")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("BatteryCapacity")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Brand")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<double>("Co2EmissionKg")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("DistanceRemainingM")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("DistanceTravelledM")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("EtaSeconds")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("FuelCapacity")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("FuelConsumptionPer100Km")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("FuelLevel")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("FuelLevelPercent")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("FuelType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("FuelUnit")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<double>("HeadingDeg")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("NumberPlate")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<double>("OdometerKm")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("PositionLat")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("PositionLon")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("Progress")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("RawPayloadJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime>("ReceivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<double>("RouteDistanceKm")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("RouteId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("RouteSummary")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<double>("SpeedKmh")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("StopsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("TelemetryId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("TimestampUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("VehicleId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TelemetryId")
+                        .IsUnique();
+
+                    b.HasIndex("VehicleId", "TimestampUtc");
+
+                    b.ToTable("VehicleTelemetries");
+                });
+
             modelBuilder.Entity("SmartFleet.Models.User", b =>
                 {
                     b.Property<int>("Id")
@@ -177,21 +305,10 @@ namespace SmartFleet.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<double>("BaseSpeedKmh")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("BatteryCapacity")
-                        .HasColumnType("double precision");
-
                     b.Property<string>("BodyType")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Brand")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
 
                     b.Property<double>("CO2Emission")
                         .HasColumnType("double precision");
@@ -202,25 +319,6 @@ namespace SmartFleet.Migrations
                     b.Property<double>("CurrentFuelLevel")
                         .HasColumnType("double precision");
 
-                    b.Property<double>("DistanceRemainingM")
-                        .HasColumnType("double precision");
-
-                    b.Property<double>("DistanceTravelledM")
-                        .HasColumnType("double precision");
-
-                    b.Property<double>("EtaSeconds")
-                        .HasColumnType("double precision");
-
-                    b.Property<string>("ExternalId")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<double>("FuelConsumptionPer100Km")
-                        .HasColumnType("double precision");
-
-                    b.Property<double>("FuelLevelPercent")
-                        .HasColumnType("double precision");
-
                     b.Property<double>("FuelTankCapacity")
                         .HasColumnType("double precision");
 
@@ -229,53 +327,13 @@ namespace SmartFleet.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
-                    b.Property<string>("FuelUnit")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<double>("HeadingDeg")
-                        .HasColumnType("double precision");
-
                     b.Property<double>("KilometersDriven")
-                        .HasColumnType("double precision");
-
-                    b.Property<DateTime?>("LastTelemetryAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<double>("Latitude")
                         .HasColumnType("double precision");
 
                     b.Property<string>("LicensePlate")
                         .IsRequired()
                         .HasMaxLength(15)
                         .HasColumnType("character varying(15)");
-
-                    b.Property<double>("Longitude")
-                        .HasColumnType("double precision");
-
-                    b.Property<double>("Progress")
-                        .HasColumnType("double precision");
-
-                    b.Property<double>("RouteDistanceKm")
-                        .HasColumnType("double precision");
-
-                    b.Property<string>("RouteId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("RouteSummary")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<double>("SpeedKmh")
-                        .HasColumnType("double precision");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -286,9 +344,6 @@ namespace SmartFleet.Migrations
                         .HasColumnType("character varying(100)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ExternalId")
-                        .IsUnique();
 
                     b.ToTable("Vehicles");
                 });

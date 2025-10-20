@@ -12,8 +12,11 @@ public class User
     public int Age { get; set; }
     public UserRole Role { get; set; }
     public bool RequiresPasswordReset { get; set; }
+    public int? VehicleId { get; set; }
 
     [JsonIgnore]
     public string PasswordHash { get; set; } = string.Empty;
-}
 
+    [JsonIgnore]
+    public Vehicle? Vehicle { get; set; }
+}

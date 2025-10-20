@@ -118,3 +118,8 @@
 /Users/zakinahimi/Desktop/smart-fleet-insight-backend/SmartFleet/SmartFleet/bin/Debug/net8.0/Microsoft.IdentityModel.Protocols.OpenIdConnect.dll
 /Users/zakinahimi/Desktop/smart-fleet-insight-backend/SmartFleet/SmartFleet/bin/Debug/net8.0/Microsoft.IdentityModel.Tokens.dll
 /Users/zakinahimi/Desktop/smart-fleet-insight-backend/SmartFleet/SmartFleet/bin/Debug/net8.0/System.IdentityModel.Tokens.Jwt.dll
+/Users/zakinahimi/Desktop/smart-fleet-insight-backend/SmartFleet/SmartFleet/bin/Debug/net8.0/Newtonsoft.Json.dll
+/Users/zakinahimi/Desktop/smart-fleet-insight-backend/SmartFleet/SmartFleet/bin/Debug/net8.0/SendGrid.dll
+/Users/zakinahimi/Desktop/smart-fleet-insight-backend/SmartFleet/SmartFleet/bin/Debug/net8.0/StarkbankEcdsa.dll
+/Users/zakinahimi/Desktop/smart-fleet-insight-backend/SmartFleet/SmartFleet/bin/Debug/net8.0/MQTTnet.dll
+/Users/zakinahimi/Desktop/smart-fleet-insight-backend/SmartFleet/SmartFleet/bin/Debug/net8.0/MQTTnet.Extensions.ManagedClient.dll
