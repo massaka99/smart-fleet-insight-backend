@@ -11,6 +11,7 @@ using SmartFleet.Models;
 using SmartFleet.Hubs;
 using SmartFleet.Options;
 using SmartFleet.Services;
+using SmartFleet.Services.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -56,6 +57,7 @@ var jwtOptions = jwtSection.Get<JwtOptions>()
 builder.Services.Configure<JwtOptions>(jwtSection);
 builder.Services.Configure<OtpOptions>(builder.Configuration.GetSection("Otp"));
 builder.Services.Configure<SendGridOptions>(builder.Configuration.GetSection("SendGrid"));
+builder.Services.Configure<TelemetryIngestionOptions>(builder.Configuration.GetSection("TelemetryIngestion"));
 
 builder.Services.AddAuthentication(options =>
     {
@@ -102,6 +104,7 @@ builder.Services.AddSingleton<ITokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailSender, SendGridEmailSender>();
 builder.Services.AddScoped<IOtpService, OtpService>();
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddHostedService<VehicleTelemetryIngestionService>();
 
 var app = builder.Build();
 
@@ -130,7 +133,6 @@ app.MapGet("/health", async (ApplicationDbContext context, CancellationToken can
     .WithOpenApi();
 
 app.Run();
-
 
 
 

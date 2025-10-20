@@ -30,14 +30,34 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
     {
         var vehicle = new Vehicle
         {
+            ExternalId = string.IsNullOrWhiteSpace(dto.ExternalId) ? null : dto.ExternalId.Trim(),
             LicensePlate = dto.LicensePlate.Trim(),
             VehicleType = dto.VehicleType.Trim(),
             FuelType = dto.FuelType.Trim(),
+            Brand = dto.Brand?.Trim() ?? string.Empty,
+            FuelUnit = dto.FuelUnit?.Trim() ?? string.Empty,
             FuelTankCapacity = dto.FuelTankCapacity,
+            BatteryCapacity = dto.BatteryCapacity,
             CurrentFuelLevel = dto.CurrentFuelLevel,
+            FuelLevelPercent = dto.FuelLevelPercent,
+            FuelConsumptionPer100Km = dto.FuelConsumptionPer100Km,
             BodyType = dto.BodyType?.Trim() ?? string.Empty,
             KilometersDriven = dto.KilometersDriven,
             CO2Emission = dto.CO2Emission,
+            Latitude = dto.Latitude,
+            Longitude = dto.Longitude,
+            SpeedKmh = dto.SpeedKmh,
+            HeadingDeg = dto.HeadingDeg,
+            DistanceTravelledM = dto.DistanceTravelledM,
+            DistanceRemainingM = dto.DistanceRemainingM,
+            Progress = dto.Progress,
+            EtaSeconds = dto.EtaSeconds,
+            RouteId = dto.RouteId?.Trim() ?? string.Empty,
+            RouteSummary = string.IsNullOrWhiteSpace(dto.RouteSummary) ? null : dto.RouteSummary.Trim(),
+            RouteDistanceKm = dto.RouteDistanceKm,
+            BaseSpeedKmh = dto.BaseSpeedKmh,
+            Status = dto.Status?.Trim() ?? string.Empty,
+            LastTelemetryAtUtc = dto.LastTelemetryAtUtc,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -59,14 +79,61 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
             return null;
         }
 
+        if (dto.ExternalId is not null)
+        {
+            vehicle.ExternalId = string.IsNullOrWhiteSpace(dto.ExternalId)
+                ? null
+                : dto.ExternalId.Trim();
+        }
         vehicle.LicensePlate = dto.LicensePlate.Trim();
         vehicle.VehicleType = dto.VehicleType.Trim();
         vehicle.FuelType = dto.FuelType.Trim();
+        if (dto.Brand is not null)
+        {
+            vehicle.Brand = dto.Brand.Trim();
+        }
+
+        if (dto.FuelUnit is not null)
+        {
+            vehicle.FuelUnit = dto.FuelUnit.Trim();
+        }
+
         vehicle.FuelTankCapacity = dto.FuelTankCapacity;
+        vehicle.BatteryCapacity = dto.BatteryCapacity;
         vehicle.CurrentFuelLevel = dto.CurrentFuelLevel;
+        vehicle.FuelLevelPercent = dto.FuelLevelPercent;
+        vehicle.FuelConsumptionPer100Km = dto.FuelConsumptionPer100Km;
         vehicle.BodyType = dto.BodyType?.Trim() ?? string.Empty;
         vehicle.KilometersDriven = dto.KilometersDriven;
         vehicle.CO2Emission = dto.CO2Emission;
+        vehicle.Latitude = dto.Latitude;
+        vehicle.Longitude = dto.Longitude;
+        vehicle.SpeedKmh = dto.SpeedKmh;
+        vehicle.HeadingDeg = dto.HeadingDeg;
+        vehicle.DistanceTravelledM = dto.DistanceTravelledM;
+        vehicle.DistanceRemainingM = dto.DistanceRemainingM;
+        vehicle.Progress = dto.Progress;
+        vehicle.EtaSeconds = dto.EtaSeconds;
+        if (dto.RouteId is not null)
+        {
+            vehicle.RouteId = dto.RouteId.Trim();
+        }
+
+        vehicle.RouteSummary = dto.RouteSummary switch
+        {
+            null => vehicle.RouteSummary,
+            { Length: 0 } => null,
+            _ => dto.RouteSummary.Trim()
+        };
+
+        vehicle.RouteDistanceKm = dto.RouteDistanceKm;
+        vehicle.BaseSpeedKmh = dto.BaseSpeedKmh;
+        if (dto.Status is not null)
+        {
+            vehicle.Status = dto.Status.Trim();
+        }
+
+        vehicle.LastTelemetryAtUtc = dto.LastTelemetryAtUtc;
         vehicle.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -111,16 +178,19 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
             return VehicleDriverAssignmentResult.UserNotDriver();
         }
 
-        var isDriverAssignedElsewhere = await _context.Vehicles
-            .AsNoTracking()
-            .AnyAsync(v => v.DriverId == userId && v.Id != vehicleId, cancellationToken);
-
-        if (isDriverAssignedElsewhere)
+        if (user.VehicleId.HasValue && user.VehicleId != vehicleId)
         {
             return VehicleDriverAssignmentResult.DriverAlreadyAssigned();
         }
 
-        vehicle.DriverId = userId;
+        if (vehicle.Driver is not null && vehicle.Driver.Id != user.Id)
+        {
+            vehicle.Driver.VehicleId = null;
+            vehicle.Driver.Vehicle = null;
+        }
+
+        user.VehicleId = vehicle.Id;
+        user.Vehicle = vehicle;
         vehicle.Driver = user;
         vehicle.UpdatedAt = DateTime.UtcNow;
 
@@ -132,19 +202,22 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
 
     public async Task<VehicleDriverRemovalResult> RemoveDriverAsync(int vehicleId, CancellationToken cancellationToken)
     {
-        var vehicle = await _context.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, cancellationToken);
+        var vehicle = await _context.Vehicles
+            .Include(v => v.Driver)
+            .FirstOrDefaultAsync(v => v.Id == vehicleId, cancellationToken);
 
         if (vehicle is null)
         {
             return VehicleDriverRemovalResult.VehicleNotFound();
         }
 
-        if (vehicle.DriverId is null)
+        if (vehicle.Driver is null)
         {
             return VehicleDriverRemovalResult.NoDriverAssigned();
         }
 
-        vehicle.DriverId = null;
+        vehicle.Driver.VehicleId = null;
+        vehicle.Driver.Vehicle = null;
         vehicle.Driver = null;
         vehicle.UpdatedAt = DateTime.UtcNow;
 

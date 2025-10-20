@@ -18,14 +18,22 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
         modelBuilder.Entity<Vehicle>(entity =>
         {
+            entity.Property(v => v.ExternalId).HasMaxLength(64);
             entity.Property(v => v.LicensePlate).IsRequired().HasMaxLength(15);
             entity.Property(v => v.VehicleType).IsRequired().HasMaxLength(100);
             entity.Property(v => v.FuelType).IsRequired().HasMaxLength(50);
             entity.Property(v => v.BodyType).HasMaxLength(100);
+            entity.Property(v => v.Brand).HasMaxLength(64);
+            entity.Property(v => v.FuelUnit).HasMaxLength(16);
+            entity.Property(v => v.Status).HasMaxLength(32);
+            entity.Property(v => v.RouteId).HasMaxLength(64);
+            entity.Property(v => v.RouteSummary).HasMaxLength(256);
+
+            entity.HasIndex(v => v.ExternalId).IsUnique();
 
             entity.HasOne(v => v.Driver)
-                .WithMany()
-                .HasForeignKey(v => v.DriverId)
+                .WithOne(u => u.Vehicle)
+                .HasForeignKey<User>(u => u.VehicleId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
@@ -76,6 +84,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasIndex(u => u.Email).IsUnique();
+            entity.HasIndex(u => u.VehicleId).IsUnique();
             entity.Property(u => u.FirstName).IsRequired();
             entity.Property(u => u.LastName).IsRequired();
             entity.Property(u => u.Email).IsRequired();
