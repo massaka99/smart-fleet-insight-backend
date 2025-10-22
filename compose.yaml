@@ -19,11 +19,20 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=SmartFleet;Username=smartfleet;Password=smartfleet_pw
+      TelemetryIngestion__Host: mosquitto
     depends_on:
       - postgres
     ports:
       - "8080:8080"
     restart: unless-stopped
+    networks:
+      - default
+      - smartfleet_shared
 
 volumes:
   smartfleet_pgdata:
+
+networks:
+  smartfleet_shared:
+    external: true
+    name: smartfleet_shared
