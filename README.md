@@ -1,6 +1,6 @@
-# smart-fleet-insight-backend
+# Fleet Insight – Backend
 
-Backend service for Smart Fleet Insight.
+Backend service for Fleet Insight.
 
 ## Database
 
@@ -30,13 +30,14 @@ docker compose up -d
 ```
 
 **Connection details**
+
 - Host (backend container): `host.docker.internal`
 - Host (backend running directly on macOS): `localhost`
 - TCP port: `1883`
 - WebSocket port: `9001`
 - Topic: `fleet/telemetry`
 - QoS: `0`
-- ClientId: use any unique value, e.g. `smartfleet-ingestion`
+- ClientId: use any unique value, e.g. `fleet-insight-ingestion`
 - CleanSession: `true`
 - Username / password: leave blank (anonymous access)
 - TLS: disabled (plain MQTT over TCP)
@@ -49,7 +50,7 @@ Telemetry__Mqtt__Port=1883
 Telemetry__Mqtt__Topic=fleet/telemetry
 Telemetry__Mqtt__Username=
 Telemetry__Mqtt__Password=
-Telemetry__Mqtt__ClientId=smartfleet-ingestion
+Telemetry__Mqtt__ClientId=fleet-insight-ingestion
 Telemetry__Mqtt__UseTls=false
 Telemetry__Mqtt__CleanSession=true
 Telemetry__Mqtt__QoS=0
