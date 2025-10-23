@@ -50,6 +50,30 @@ builder.Services.AddSwaggerGen(options =>
 
 builder.Services.AddMemoryCache();
 
+var allowedCorsOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>();
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AppCors", policy =>
+    {
+        if (allowedCorsOrigins is { Length: > 0 })
+        {
+            policy.WithOrigins(allowedCorsOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        }
+        else
+        {
+            policy.AllowAnyOrigin()
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        }
+    });
+});
+
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtOptions = jwtSection.Get<JwtOptions>()
                 ?? throw new InvalidOperationException("JWT settings not configured correctly.");
@@ -115,6 +139,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseCors("AppCors");
 
 app.UseAuthentication();
 app.UseAuthorization();
