@@ -88,6 +88,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(u => u.FirstName).IsRequired();
             entity.Property(u => u.LastName).IsRequired();
             entity.Property(u => u.Email).IsRequired();
+            entity.Property(u => u.OtpHash).HasMaxLength(128);
         });
 
         modelBuilder.Entity<User>().HasData(
@@ -100,7 +101,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 ProfileImageUrl = null,
                 Age = 35,
                 Role = UserRole.Admin,
-                PasswordHash = "AQAAAAIAAYagAAAAEOCJVUh+L5Pygby4OYlYZtLtrN/TrziEgkz6euPJtg4/c5uRcY1y6TrWBJF3+rt5Cg=="
+                PasswordHash = "AQAAAAIAAYagAAAAEOCJVUh+L5Pygby4OYlYZtLtrN/TrziEgkz6euPJtg4/c5uRcY1y6TrWBJF3+rt5Cg==",
+                OtpHash = null,
+                OtpExpiresAt = null
             });
     }
 }

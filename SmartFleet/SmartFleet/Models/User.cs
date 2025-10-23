@@ -13,6 +13,8 @@ public class User
     public UserRole Role { get; set; }
     public bool RequiresPasswordReset { get; set; }
     public int? VehicleId { get; set; }
+    public string? OtpHash { get; set; }
+    public DateTimeOffset? OtpExpiresAt { get; set; }
 
     [JsonIgnore]
     public string PasswordHash { get; set; } = string.Empty;

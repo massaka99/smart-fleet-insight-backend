@@ -168,6 +168,40 @@ public class AuthController(
         return Ok(CreateLoginResponse(user, token));
     }
 
+    [HttpPost("forgot-password")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryNormalizeEmail(request.Email, out var normalizedEmail))
+        {
+            return NoContent();
+        }
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
+        if (user is null)
+        {
+            return NoContent();
+        }
+
+        try
+        {
+            await _otpService.SendOtpAsync(user, cancellationToken);
+        }
+        catch
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to send reset email." });
+        }
+
+        user.RequiresPasswordReset = true;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return NoContent();
+    }
+
+    [HttpPost("logout")]
+    [Authorize]
+    public IActionResult Logout() => NoContent();
+
     [HttpPost("set-password")]
     [Authorize]
     public async Task<ActionResult<LoginResponse>> SetPassword([FromBody] SetPasswordRequest request, CancellationToken cancellationToken)
