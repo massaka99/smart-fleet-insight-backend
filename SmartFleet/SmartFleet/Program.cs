@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -138,7 +139,27 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+var webRootPath = app.Environment.WebRootPath;
+if (string.IsNullOrWhiteSpace(webRootPath))
+{
+    webRootPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+    app.Environment.WebRootPath = webRootPath;
+}
+
+var uploadsPath = Path.Combine(webRootPath, "uploads", "users");
+try
+{
+    Directory.CreateDirectory(uploadsPath);
+}
+catch (Exception ex)
+{
+    app.Logger.LogCritical(ex, "Failed to ensure profile image upload directory at {UploadsPath}", uploadsPath);
+    throw;
+}
+
 app.UseHttpsRedirection();
+
+app.UseStaticFiles();
 
 app.UseCors("AppCors");
 

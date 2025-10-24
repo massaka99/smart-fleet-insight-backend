@@ -72,7 +72,6 @@ public class AuthController(
             FirstName = firstName,
             LastName = lastName,
             Email = normalizedEmail,
-            ProfileImageUrl = NormalizeOptional(request.ProfileImageUrl),
             Age = request.Age,
             Role = request.Role,
             RequiresPasswordReset = true
@@ -261,8 +260,6 @@ public class AuthController(
         normalizedEmail = trimmed.ToLowerInvariant();
         return true;
     }
-
-    private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private bool TryGetUserId(out int userId)
     {

@@ -32,9 +32,6 @@ public class UserProfileUpdateDto
 
     [Range(1, 150)]
     public int Age { get; init; }
-
-    [StringLength(2048)]
-    public string? ProfileImageUrl { get; init; }
 }
 
 public class UserRoleUpdateDto

@@ -11,6 +11,7 @@ public interface IUserService
     Task<User?> MarkForPasswordResetAsync(string email, CancellationToken cancellationToken);
     Task<User?> UpdateRoleAsync(int id, UserRole role, CancellationToken cancellationToken);
     Task<UserProfileUpdateResult> UpdateProfileAsync(int userId, UserProfileUpdateDto dto, CancellationToken cancellationToken);
+    Task<User?> UpdateProfileImageAsync(int userId, string? profileImagePath, CancellationToken cancellationToken);
     Task<UserPasswordUpdateResult> UpdatePasswordAsync(int userId, UserPasswordUpdateDto dto, CancellationToken cancellationToken);
     Task ResetPasswordAsync(int userId, string newPassword, CancellationToken cancellationToken);
     Task<bool> DeleteAsync(int id, CancellationToken cancellationToken);

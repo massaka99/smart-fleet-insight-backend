@@ -93,11 +93,25 @@ public class UserService(ApplicationDbContext context, IPasswordHasher<User> pas
         user.LastName = lastName;
         user.Email = normalizedEmail;
         user.Age = dto.Age;
-        user.ProfileImageUrl = NormalizeOptional(dto.ProfileImageUrl);
 
         await _context.SaveChangesAsync(cancellationToken);
 
         return UserProfileUpdateResult.Success(user);
+    }
+
+    public async Task<User?> UpdateProfileImageAsync(int userId, string? profileImagePath, CancellationToken cancellationToken)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+
+        if (user is null)
+        {
+            return null;
+        }
+
+        user.ProfileImageUrl = profileImagePath;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return user;
     }
 
     public async Task<UserPasswordUpdateResult> UpdatePasswordAsync(int userId, UserPasswordUpdateDto dto, CancellationToken cancellationToken)
@@ -150,8 +164,6 @@ public class UserService(ApplicationDbContext context, IPasswordHasher<User> pas
     }
 
     private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
-
-    private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
 
