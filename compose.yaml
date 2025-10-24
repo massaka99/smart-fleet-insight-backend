@@ -24,6 +24,8 @@ services:
       - postgres
     ports:
       - "8080:8080"
+    volumes:
+      - smartfleet_uploads:/app/wwwroot/uploads
     restart: unless-stopped
     networks:
       - default
@@ -31,6 +33,7 @@ services:
 
 volumes:
   smartfleet_pgdata:
+  smartfleet_uploads:
 
 networks:
   smartfleet_shared:

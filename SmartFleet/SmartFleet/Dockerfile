@@ -19,5 +19,8 @@ RUN dotnet publish "SmartFleet.csproj" -c $BUILD_CONFIGURATION -o /app/publish /
 
 FROM base AS final
 WORKDIR /app
+USER root
+RUN mkdir -p /app/wwwroot/uploads/users && chown -R app:app /app/wwwroot
 COPY --from=publish /app/publish .
+USER app
 ENTRYPOINT ["dotnet", "SmartFleet.dll"]
