@@ -18,7 +18,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=SmartFleet;Username=smartfleet;Password=smartfleet_pw
+      ConnectionStrings__DefaultConnection: Host=ep-falling-rice-a8o5qfow-pooler.eastus2.azure.neon.tech; Database=neondb; Username=neondb_owner; Password=npg_sztdHA3W0UTv; SSL Mode=VerifyFull; Channel Binding=Require;
       TelemetryIngestion__Host: mosquitto
     depends_on:
       - postgres
