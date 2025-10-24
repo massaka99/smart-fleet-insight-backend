@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Hosting;
+using System.ComponentModel.DataAnnotations;
 using SmartFleet.Dtos;
 using SmartFleet.Services;
 
@@ -95,14 +96,17 @@ public class UsersController(
     }
 
     [HttpPost("me/profile/photo")]
+    [Consumes("multipart/form-data")]
     [RequestSizeLimit(MaxProfileImageBytes)]
     [RequestFormLimits(MultipartBodyLengthLimit = MaxProfileImageBytes)]
-    public async Task<ActionResult<UserDto>> UploadMyProfilePhoto([FromForm] IFormFile? file, CancellationToken cancellationToken)
+    public async Task<ActionResult<UserDto>> UploadMyProfilePhoto([FromForm] ProfilePhotoUploadRequest request, CancellationToken cancellationToken)
     {
         if (!TryGetUserId(out var userId))
         {
             return Unauthorized();
         }
+
+        var file = request.File;
 
         if (file is null)
         {
@@ -254,6 +258,12 @@ public class UsersController(
             }
         }
     }
+}
+
+public class ProfilePhotoUploadRequest
+{
+    [Required]
+    public IFormFile? File { get; set; }
 }
 
 
