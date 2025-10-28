@@ -8,14 +8,27 @@ namespace SmartFleet.Services;
 public class VehicleService(ApplicationDbContext context) : IVehicleService
 {
     private readonly ApplicationDbContext _context = context;
+    private static readonly TimeSpan StaleTelemetryThreshold = TimeSpan.FromMinutes(5);
 
     public async Task<IReadOnlyCollection<Vehicle>> GetAllAsync(CancellationToken cancellationToken)
     {
-        return await _context.Vehicles
+        var vehicles = await _context.Vehicles
             .Include(v => v.Driver)
             .AsNoTracking()
-            .OrderByDescending(v => v.CreatedAt)
+            .OrderByDescending(v => v.LastTelemetryAtUtc ?? v.UpdatedAt)
             .ToListAsync(cancellationToken);
+
+        var staleThresholdUtc = DateTime.UtcNow - StaleTelemetryThreshold;
+
+        foreach (var vehicle in vehicles)
+        {
+            if (vehicle.LastTelemetryAtUtc is null || vehicle.LastTelemetryAtUtc < staleThresholdUtc)
+            {
+                vehicle.Status = "offline";
+            }
+        }
+
+        return vehicles;
     }
 
     public async Task<Vehicle?> GetByIdAsync(int id, CancellationToken cancellationToken)

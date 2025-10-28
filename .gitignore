@@ -1,5 +1,49 @@
-**/bin/
-**/obj/
+# Solution-wide ignores
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+.AppleDouble
+.LSOverride
+desktop.ini
+*.stackdump
+*.lock
+
+# IDE settings
+.vscode/
+.vs/
+.idea/
+*.code-workspace
+*.sln.iml
+*.DotSettings
+*.DotSettings.user
+
+# User-specific files
+*.suo
+*.user
+*.userosscache
+*.userprefs
+*.rsuser
+*.sln.docstates
+
+# Rider / ReSharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+resharper-host/
+.ncrunch*
+.nCrunchTemp/
+
+# Build artifacts
+[Bb]in/
+[Oo]bj/
+[Bb]ld/
+[Ll]og/
+[Ll]ogs/
+[Tt]est[Rr]esults*/
+TestResults/
+BenchmarkDotNet.Artifacts/
+artifacts/
+Generated\ Files/
 **/[Dd]ebug/
 **/[Rr]elease/
 **/x86/
@@ -12,39 +56,65 @@
 *.cache
 *.deps.json
 *.sourcelink.json
-*.log
 *.tmp
 *.old
 *.bak
-.vs/
-.idea/
-*.suo
-*.user
-*.userosscache
-*.sln.docstates
-*.DotSettings
-*.DotSettings.user
-_ReSharper*/
-resharper-host/
-.ncrunch*
-.nCrunchTemp/
+*.orig
+*.log
+
+# Intermediate build files
+*.obj
+*.iobj
+*.ipdb
+*.ilk
+*.pch
+*.tlog
+
+# NuGet artifacts
+packages/
+.nuget/
 *.nupkg
 *.snupkg
 *.nuspec
 *.nuget.*
 project.lock.json
 project.fragment.lock.json
-packages/
-artifacts/
-.vscode/
-.DS_Store
-Thumbs.db
-desktop.ini
-.env
-.env.*
+
+# Publish outputs
+[Pp]ublish/
+app.publish/
+*.publishsettings
+[Pp]ublish[Pp]rofiles/
+
+# Entity Framework tooling
+Migrations/Backup/
+*.efbundle
+
+# Docker and environment files
+docker-data/
+.docker/
+docker-compose.override.yml
+*.env
+*.env.*
 secrets.json
 appsettings.*.local.json
-TestResults/
+
+# Coverage tooling
 coverage/
+coverage.faillog
 *.coverage
 *.coveragexml
+*.dotCover
+
+# Database and cache dumps
+*.dbmdl
+*.mdf
+*.ldf
+*.ndf
+
+# Temporary files
+~*
+*.sw?
+*.swo
+*.swp
+npm-debug.log
