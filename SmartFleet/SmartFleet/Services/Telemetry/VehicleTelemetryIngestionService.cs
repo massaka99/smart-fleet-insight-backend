@@ -1,5 +1,8 @@
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Channels;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -11,6 +14,8 @@ using MQTTnet.Extensions.ManagedClient;
 using MQTTnet.Formatter;
 using MQTTnet.Protocol;
 using SmartFleet.Data;
+using SmartFleet.Dtos;
+using SmartFleet.Hubs;
 using SmartFleet.Models;
 using SmartFleet.Models.Telemetry;
 using SmartFleet.Options;
@@ -24,28 +29,37 @@ public class VehicleTelemetryIngestionService : BackgroundService
     private readonly TelemetryIngestionOptions _options;
     private readonly IManagedMqttClient _mqttClient;
     private readonly Channel<TelemetryEnvelope> _telemetryChannel;
+    private readonly IHubContext<VehicleHub> _vehicleHubContext;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly int _batchSize;
+    private readonly TimeSpan _flushInterval;
 
     public VehicleTelemetryIngestionService(
         IServiceScopeFactory scopeFactory,
         ILogger<VehicleTelemetryIngestionService> logger,
-        IOptions<TelemetryIngestionOptions> optionsAccessor)
+        IOptions<TelemetryIngestionOptions> optionsAccessor,
+        IHubContext<VehicleHub> vehicleHubContext)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
         _options = optionsAccessor.Value;
+        _vehicleHubContext = vehicleHubContext;
         var capacity = Math.Max(1, _options.QueueCapacity);
         _telemetryChannel = Channel.CreateBounded<TelemetryEnvelope>(new BoundedChannelOptions(capacity)
         {
             SingleReader = true,
             SingleWriter = false,
-            FullMode = BoundedChannelFullMode.DropOldest
+            FullMode = BoundedChannelFullMode.Wait
         });
 
         _mqttClient = new MqttFactory().CreateManagedMqttClient();
         _mqttClient.ApplicationMessageReceivedAsync += HandleMessageAsync;
         _mqttClient.ConnectingFailedAsync += HandleConnectingFailedAsync;
         _mqttClient.DisconnectedAsync += HandleDisconnectedAsync;
+
+        _batchSize = Math.Max(1, _options.BatchSize);
+        var flushMillis = Math.Clamp(_options.FlushIntervalMilliseconds, 25, 2000);
+        _flushInterval = TimeSpan.FromMilliseconds(flushMillis);
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
@@ -141,13 +155,61 @@ public class VehicleTelemetryIngestionService : BackgroundService
 
     private async Task ProcessQueueAsync(CancellationToken stoppingToken)
     {
+        var batch = new List<TelemetryEnvelope>(_batchSize);
+
         try
         {
-            await foreach (var envelope in _telemetryChannel.Reader.ReadAllAsync(stoppingToken))
+            while (!stoppingToken.IsCancellationRequested &&
+                   await _telemetryChannel.Reader.WaitToReadAsync(stoppingToken))
             {
+                batch.Clear();
+
+                var firstEnvelope = await _telemetryChannel.Reader.ReadAsync(stoppingToken);
+                batch.Add(firstEnvelope);
+
+                var flushDeadline = DateTime.UtcNow + _flushInterval;
+
+                while (batch.Count < _batchSize)
+                {
+                    if (_telemetryChannel.Reader.TryRead(out var nextEnvelope))
+                    {
+                        batch.Add(nextEnvelope);
+                        continue;
+                    }
+
+                    var remaining = flushDeadline - DateTime.UtcNow;
+                    if (remaining <= TimeSpan.Zero)
+                    {
+                        break;
+                    }
+
+                    try
+                    {
+                        var waitTask = _telemetryChannel.Reader.WaitToReadAsync(stoppingToken).AsTask();
+                        var delayTask = Task.Delay(remaining, stoppingToken);
+                        var completed = await Task.WhenAny(waitTask, delayTask);
+
+                        if (completed == waitTask)
+                        {
+                            if (!waitTask.Result)
+                            {
+                                break;
+                            }
+
+                            continue;
+                        }
+
+                        break;
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                }
+
                 try
                 {
-                    await PersistAsync(envelope, stoppingToken);
+                    await PersistBatchAsync(batch, stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -155,7 +217,7 @@ public class VehicleTelemetryIngestionService : BackgroundService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to persist telemetry with id {TelemetryId}.", envelope.Payload.TelemetryId);
+                    _logger.LogError(ex, "Failed to persist telemetry batch containing {Count} entries.", batch.Count);
                 }
             }
         }
@@ -165,10 +227,60 @@ public class VehicleTelemetryIngestionService : BackgroundService
         }
     }
 
-    private async Task PersistAsync(TelemetryEnvelope envelope, CancellationToken cancellationToken)
+    private async Task PersistBatchAsync(
+        IReadOnlyList<TelemetryEnvelope> batch,
+        CancellationToken cancellationToken)
     {
+        if (batch.Count == 0)
+        {
+            return;
+        }
+
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var byExternalId = new Dictionary<string, Vehicle>(StringComparer.OrdinalIgnoreCase);
+        var byLicensePlate = new Dictionary<string, Vehicle>(StringComparer.OrdinalIgnoreCase);
+        var vehiclesToBroadcast = new List<Vehicle>(batch.Count);
+
+        foreach (var envelope in batch)
+        {
+            try
+            {
+                var vehicle = await UpsertVehicleAsync(
+                    dbContext,
+                    envelope,
+                    byExternalId,
+                    byLicensePlate,
+                    cancellationToken);
+
+                vehiclesToBroadcast.Add(vehicle);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to persist telemetry with id {TelemetryId}.", envelope.Payload.TelemetryId);
+            }
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        foreach (var vehicle in vehiclesToBroadcast.DistinctBy(v => v.Id))
+        {
+            await BroadcastVehicleUpdateAsync(dbContext, vehicle, cancellationToken);
+        }
+    }
+
+    private async Task<Vehicle> UpsertVehicleAsync(
+        ApplicationDbContext dbContext,
+        TelemetryEnvelope envelope,
+        IDictionary<string, Vehicle> byExternalId,
+        IDictionary<string, Vehicle> byLicensePlate,
+        CancellationToken cancellationToken)
+    {
         var payload = envelope.Payload;
         var receivedAt = envelope.ReceivedAtUtc;
 
@@ -189,14 +301,43 @@ public class VehicleTelemetryIngestionService : BackgroundService
 
         if (!string.IsNullOrEmpty(normalizedExternalId))
         {
-            vehicle = await dbContext.Vehicles
-                .FirstOrDefaultAsync(v => v.ExternalId == normalizedExternalId, cancellationToken);
+            if (!byExternalId.TryGetValue(normalizedExternalId, out vehicle))
+            {
+                vehicle = await dbContext.Vehicles
+                    .FirstOrDefaultAsync(v => v.ExternalId == normalizedExternalId, cancellationToken);
+
+                if (vehicle is not null)
+                {
+                    if (!string.IsNullOrEmpty(vehicle.ExternalId))
+                    {
+                        byExternalId[vehicle.ExternalId] = vehicle;
+                    }
+
+                    if (!string.IsNullOrEmpty(vehicle.LicensePlate))
+                    {
+                        byLicensePlate[vehicle.LicensePlate] = vehicle;
+                    }
+                }
+            }
         }
 
         if (vehicle is null && !string.IsNullOrEmpty(normalizedPlate))
         {
-            vehicle = await dbContext.Vehicles
-                .FirstOrDefaultAsync(v => v.LicensePlate == normalizedPlate, cancellationToken);
+            if (!byLicensePlate.TryGetValue(normalizedPlate, out vehicle))
+            {
+                vehicle = await dbContext.Vehicles
+                    .FirstOrDefaultAsync(v => v.LicensePlate == normalizedPlate, cancellationToken);
+
+                if (vehicle is not null)
+                {
+                    if (!string.IsNullOrEmpty(vehicle.ExternalId))
+                    {
+                        byExternalId[vehicle.ExternalId] = vehicle;
+                    }
+
+                    byLicensePlate[vehicle.LicensePlate] = vehicle;
+                }
+            }
         }
 
         if (vehicle is null)
@@ -248,7 +389,7 @@ public class VehicleTelemetryIngestionService : BackgroundService
 
             if (!string.IsNullOrEmpty(normalizedPlate))
             {
-                vehicle.LicensePlate = normalizedPlate!;
+                vehicle.LicensePlate = normalizedPlate;
             }
 
             if (!string.IsNullOrWhiteSpace(payload.Brand))
@@ -317,17 +458,71 @@ public class VehicleTelemetryIngestionService : BackgroundService
             vehicle.UpdatedAt = DateTime.UtcNow;
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        if (!string.IsNullOrEmpty(normalizedExternalId))
+        {
+            byExternalId[normalizedExternalId] = vehicle;
+        }
+        else if (!string.IsNullOrEmpty(vehicle.ExternalId))
+        {
+            byExternalId[vehicle.ExternalId] = vehicle;
+        }
+
+        var plateKey = normalizedPlate ?? vehicle.LicensePlate;
+        if (!string.IsNullOrEmpty(plateKey))
+        {
+            byLicensePlate[plateKey] = vehicle;
+        }
+
+        return vehicle;
     }
 
-    private Task HandleMessageAsync(MqttApplicationMessageReceivedEventArgs args)
+    private async Task BroadcastVehicleUpdateAsync(ApplicationDbContext dbContext, Vehicle vehicle, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        try
+        {
+            var driverEntry = dbContext.Entry(vehicle).Reference(v => v.Driver);
+            if (!driverEntry.IsLoaded)
+            {
+                await driverEntry.LoadAsync(cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to load driver relationship for vehicle {VehicleId}", vehicle.Id);
+        }
+
+        try
+        {
+            var dto = vehicle.ToVehicleDto();
+            await _vehicleHubContext.Clients.All.SendAsync(VehicleHub.VehicleUpdatedMethod, dto, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Ignore cancellations triggered by shutdown.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to broadcast telemetry update for vehicle {VehicleId}", vehicle.Id);
+        }
+    }
+
+    private async Task HandleMessageAsync(MqttApplicationMessageReceivedEventArgs args)
     {
         var rawJson = args.ApplicationMessage?.ConvertPayloadToString();
 
         if (string.IsNullOrWhiteSpace(rawJson))
         {
             _logger.LogWarning("Received telemetry message without payload, dropping.");
-            return Task.CompletedTask;
+            return;
         }
 
         VehicleTelemetryPayload? payload;
@@ -339,23 +534,25 @@ public class VehicleTelemetryIngestionService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to parse telemetry payload: {PayloadSnippet}", rawJson[..Math.Min(rawJson.Length, 128)]);
-            return Task.CompletedTask;
+            return;
         }
 
         if (payload is null || string.IsNullOrWhiteSpace(payload.TelemetryId))
         {
             _logger.LogWarning("Telemetry payload missing telemetry_id. Payload dropped.");
-            return Task.CompletedTask;
+            return;
         }
 
         var envelope = new TelemetryEnvelope(payload, DateTime.UtcNow);
 
-        if (!_telemetryChannel.Writer.TryWrite(envelope))
+        try
         {
-            _logger.LogWarning("Telemetry channel full. Dropping telemetry with id {TelemetryId}.", payload.TelemetryId);
+            await _telemetryChannel.Writer.WriteAsync(envelope, CancellationToken.None);
         }
-
-        return Task.CompletedTask;
+        catch (ChannelClosedException)
+        {
+            _logger.LogWarning("Telemetry channel closed. Dropping telemetry with id {TelemetryId}.", payload.TelemetryId);
+        }
     }
 
     private Task HandleConnectingFailedAsync(ConnectingFailedEventArgs args)

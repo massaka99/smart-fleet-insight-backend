@@ -101,6 +101,24 @@ builder.Services.AddAuthentication(options =>
             ValidAudience = jwtOptions.Audience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Key))
         };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(accessToken))
+                {
+                    var path = context.HttpContext.Request.Path;
+                    if (path.StartsWithSegments("/hubs/vehicles", StringComparison.OrdinalIgnoreCase))
+                    {
+                        context.Token = accessToken;
+                    }
+                }
+
+                return Task.CompletedTask;
+            }
+        };
     });
 
 builder.Services.AddAuthorization(options =>
@@ -109,7 +127,7 @@ builder.Services.AddAuthorization(options =>
         policy.RequireRole(UserRole.Coordinator.ToString(), UserRole.Admin.ToString()));
 
     options.AddPolicy("MapsAccess", policy =>
-        policy.RequireRole(UserRole.Driver.ToString(), UserRole.Admin.ToString()));
+        policy.RequireRole(UserRole.Driver.ToString(), UserRole.Coordinator.ToString(), UserRole.Admin.ToString()));
 
     options.AddPolicy("RoleAdminAccess", policy =>
         policy.RequireRole(UserRole.Admin.ToString()));
@@ -169,6 +187,7 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.MapHub<ChatHub>("/hubs/chat");
+app.MapHub<VehicleHub>("/hubs/vehicles");
 
 app.MapGet("/health", async (ApplicationDbContext context, CancellationToken cancellationToken) =>
     {
