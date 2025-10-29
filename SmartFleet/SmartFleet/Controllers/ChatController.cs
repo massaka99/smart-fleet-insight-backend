@@ -1,5 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Collections.Generic;
 using System.Security.Claims;
+using System.Linq;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -57,6 +59,25 @@ public class ChatController(
         }
     }
 
+    [HttpGet("participants")]
+    public async Task<ActionResult<IEnumerable<ChatParticipantDto>>> GetParticipants(CancellationToken cancellationToken = default)
+    {
+        if (!TryGetUserId(out var requesterId))
+        {
+            return Unauthorized();
+        }
+
+        var participants = await _context.Users
+            .AsNoTracking()
+            .Where(u => u.Id != requesterId)
+            .OrderBy(u => u.FirstName)
+            .ThenBy(u => u.LastName)
+            .Select(u => u.ToChatParticipantDto())
+            .ToListAsync(cancellationToken);
+
+        return Ok(participants);
+    }
+
     [HttpPost("{recipientId:int}/messages")]
     public async Task<ActionResult<ChatMessageDto>> SendMessage(int recipientId, [FromBody] SendChatMessageRequest request, CancellationToken cancellationToken)
     {
@@ -88,7 +109,7 @@ public class ChatController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send chat message from {SenderId} to {RecipientId}", senderId, recipientId);
-            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Kunne ikke sende beskeden. Prøv igen." });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Kunne ikke sende beskeden. Prï¿½v igen." });
         }
     }
 
@@ -121,3 +142,6 @@ public class ChatController(
         return int.TryParse(claim, out userId);
     }
 }
+
+
+
