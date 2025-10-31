@@ -110,7 +110,8 @@ builder.Services.AddAuthentication(options =>
                 if (!string.IsNullOrEmpty(accessToken))
                 {
                     var path = context.HttpContext.Request.Path;
-                    if (path.StartsWithSegments("/hubs/vehicles", StringComparison.OrdinalIgnoreCase))
+                    if (path.StartsWithSegments("/hubs/vehicles", StringComparison.OrdinalIgnoreCase) ||
+                        path.StartsWithSegments("/hubs/chat", StringComparison.OrdinalIgnoreCase))
                     {
                         context.Token = accessToken;
                     }
