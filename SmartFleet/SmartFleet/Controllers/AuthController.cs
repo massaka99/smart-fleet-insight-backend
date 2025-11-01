@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Net.Mail;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
@@ -18,12 +19,15 @@ public class AuthController(
     ApplicationDbContext context,
     IPasswordHasher<User> passwordHasher,
     ITokenService tokenService,
-    IOtpService otpService) : ControllerBase
+    IOtpService otpService,
+    IUserSessionTracker sessionTracker) : ControllerBase
 {
     private readonly ApplicationDbContext _context = context;
     private readonly IPasswordHasher<User> _passwordHasher = passwordHasher;
     private readonly ITokenService _tokenService = tokenService;
     private readonly IOtpService _otpService = otpService;
+    private readonly IUserSessionTracker _sessionTracker = sessionTracker;
+    private const string SingleSessionConflictMessage = "Brugeren er allerede logget ind på en anden enhed.";
 
     [HttpPost("register")]
     [Authorize(Policy = "RoleAdminAccess")]
@@ -92,8 +96,13 @@ public class AuthController(
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to send OTP email." });
         }
 
-        var token = _tokenService.GenerateToken(user);
-        return Created($"/api/users/{user.Id}", CreateLoginResponse(user, token));
+        var token = _tokenService.GenerateToken(user, Guid.NewGuid());
+        if (!_sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt))
+        {
+            return Conflict(new { message = SingleSessionConflictMessage });
+        }
+
+        return Created($"/api/users/{user.Id}", CreateLoginResponse(user, token.Token));
     }
 
     [HttpPost("login")]
@@ -124,8 +133,13 @@ public class AuthController(
             return Unauthorized();
         }
 
-        var token = _tokenService.GenerateToken(user);
-        return Ok(CreateLoginResponse(user, token));
+        var token = _tokenService.GenerateToken(user, Guid.NewGuid());
+        if (!_sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt))
+        {
+            return Conflict(new { message = SingleSessionConflictMessage });
+        }
+
+        return Ok(CreateLoginResponse(user, token.Token));
     }
 
     [HttpPost("login-otp")]
@@ -163,8 +177,13 @@ public class AuthController(
             };
         }
 
-        var token = _tokenService.GenerateToken(user);
-        return Ok(CreateLoginResponse(user, token));
+        var token = _tokenService.GenerateToken(user, Guid.NewGuid());
+        if (!_sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt))
+        {
+            return Conflict(new { message = SingleSessionConflictMessage });
+        }
+
+        return Ok(CreateLoginResponse(user, token.Token));
     }
 
     [HttpPost("forgot-password")]
@@ -199,7 +218,15 @@ public class AuthController(
 
     [HttpPost("logout")]
     [Authorize]
-    public IActionResult Logout() => NoContent();
+    public IActionResult Logout()
+    {
+        if (TryGetSessionId(out var sessionId))
+        {
+            _sessionTracker.EndSession(sessionId);
+        }
+
+        return NoContent();
+    }
 
     [HttpPost("set-password")]
     [Authorize]
@@ -232,8 +259,34 @@ public class AuthController(
         user.RequiresPasswordReset = false;
         await _context.SaveChangesAsync(cancellationToken);
 
-        var token = _tokenService.GenerateToken(user);
-        return Ok(CreateLoginResponse(user, token));
+        var hasExistingSession = TryGetSessionId(out var sessionId);
+        if (!hasExistingSession)
+        {
+            sessionId = Guid.NewGuid();
+        }
+
+        var token = _tokenService.GenerateToken(user, sessionId);
+
+        bool sessionValidated;
+        if (hasExistingSession)
+        {
+            sessionValidated = _sessionTracker.RenewSession(user.Id, token.SessionId, token.ExpiresAt);
+            if (!sessionValidated)
+            {
+                sessionValidated = _sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt);
+            }
+        }
+        else
+        {
+            sessionValidated = _sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt);
+        }
+
+        if (!sessionValidated)
+        {
+            return Conflict(new { message = SingleSessionConflictMessage });
+        }
+
+        return Ok(CreateLoginResponse(user, token.Token));
     }
 
     private static LoginResponse CreateLoginResponse(User user, string token) => new(
@@ -259,6 +312,12 @@ public class AuthController(
 
         normalizedEmail = trimmed.ToLowerInvariant();
         return true;
+    }
+
+    private bool TryGetSessionId(out Guid sessionId)
+    {
+        var claim = User.FindFirstValue(JwtRegisteredClaimNames.Jti) ?? User.FindFirstValue("jti");
+        return Guid.TryParse(claim, out sessionId);
     }
 
     private bool TryGetUserId(out int userId)

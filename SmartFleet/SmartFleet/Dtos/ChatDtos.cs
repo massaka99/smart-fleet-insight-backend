@@ -29,6 +29,8 @@ public class ChatMessageDto
     public int ThreadId { get; init; }
     public int SenderId { get; init; }
     public int RecipientId { get; init; }
+    public ChatParticipantDto? Sender { get; init; }
+    public ChatParticipantDto? Recipient { get; init; }
     public string Body { get; init; } = string.Empty;
     public ChatMessageStatus Status { get; init; }
     public DateTime SentAt { get; init; }
@@ -69,6 +71,8 @@ public static class ChatMappingExtensions
         ThreadId = message.ThreadId,
         SenderId = message.SenderId,
         RecipientId = message.RecipientId,
+        Sender = message.Sender?.ToChatParticipantDto(),
+        Recipient = message.Recipient?.ToChatParticipantDto(),
         Body = message.Body,
         Status = message.Status,
         SentAt = message.SentAt,
