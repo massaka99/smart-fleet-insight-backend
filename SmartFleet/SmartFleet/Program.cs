@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using System.IdentityModel.Tokens.Jwt;
 using SmartFleet.Authorization;
 using SmartFleet.Data;
 using SmartFleet.Models;
@@ -13,6 +14,7 @@ using SmartFleet.Hubs;
 using SmartFleet.Options;
 using SmartFleet.Services;
 using SmartFleet.Services.Telemetry;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -50,6 +52,7 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<IUserSessionTracker, UserSessionTracker>();
 
 var allowedCorsOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
@@ -118,6 +121,28 @@ builder.Services.AddAuthentication(options =>
                 }
 
                 return Task.CompletedTask;
+            },
+            OnTokenValidated = async context =>
+            {
+                var principal = context.Principal;
+                var sessionClaim = principal?.FindFirst(JwtRegisteredClaimNames.Jti)?.Value
+                    ?? principal?.FindFirst("jti")?.Value;
+                var userClaim = principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+                if (!Guid.TryParse(sessionClaim, out var sessionId) || !int.TryParse(userClaim, out var userId))
+                {
+                    context.Fail("Invalid authentication session.");
+                    return;
+                }
+
+                var tracker = context.HttpContext.RequestServices.GetRequiredService<IUserSessionTracker>();
+                if (!tracker.IsSessionActive(userId, sessionId))
+                {
+                    context.Fail("Session is no longer active.");
+                    return;
+                }
+
+                await Task.CompletedTask;
             }
         };
     });

@@ -21,4 +21,5 @@ public class User
 
     [JsonIgnore]
     public Vehicle? Vehicle { get; set; }
+
 }

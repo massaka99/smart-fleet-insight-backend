@@ -12,7 +12,7 @@ public class JwtTokenService(IOptions<JwtOptions> options) : ITokenService
 {
     private readonly JwtOptions _options = options.Value;
 
-    public string GenerateToken(User user)
+    public GeneratedToken GenerateToken(User user, Guid sessionId)
     {
         var claims = new List<Claim>
         {
@@ -23,20 +23,24 @@ public class JwtTokenService(IOptions<JwtOptions> options) : ITokenService
             new(JwtRegisteredClaimNames.Email, user.Email),
             new(ClaimTypes.Email, user.Email),
             new(ClaimTypes.Role, user.Role.ToString()),
-            new("requiresPasswordReset", user.RequiresPasswordReset ? "true" : "false")
+            new("requiresPasswordReset", user.RequiresPasswordReset ? "true" : "false"),
+            new(JwtRegisteredClaimNames.Jti, sessionId.ToString())
         };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.Key));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
+        var expiresAt = DateTime.UtcNow.AddMinutes(_options.ExpiresMinutes);
+
         var token = new JwtSecurityToken(
             issuer: _options.Issuer,
             audience: _options.Audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(_options.ExpiresMinutes),
+            expires: expiresAt,
             signingCredentials: credentials);
 
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
+        return new GeneratedToken(tokenString, expiresAt, sessionId);
     }
 }
 

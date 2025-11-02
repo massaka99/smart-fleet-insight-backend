@@ -4,5 +4,5 @@ namespace SmartFleet.Services;
 
 public interface ITokenService
 {
-    string GenerateToken(User user);
+    GeneratedToken GenerateToken(User user, Guid sessionId);
 }

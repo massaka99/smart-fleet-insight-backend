@@ -122,10 +122,10 @@ public class ChatService(ApplicationDbContext context, ILogger<ChatService> logg
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        await BroadcastAsync(() => _notifier.MessageSentAsync(message, cancellationToken));
-
         await _context.Entry(message).Reference(m => m.Sender).LoadAsync(cancellationToken);
         await _context.Entry(message).Reference(m => m.Recipient).LoadAsync(cancellationToken);
+
+        await BroadcastAsync(() => _notifier.MessageSentAsync(message, cancellationToken));
 
         return message;
     }
