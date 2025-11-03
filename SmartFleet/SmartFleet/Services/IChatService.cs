@@ -9,4 +9,11 @@ public interface IChatService
     Task<ChatMessage> SendMessageAsync(int senderId, int recipientId, string messageBody, CancellationToken cancellationToken);
     Task<bool> MarkDeliveredAsync(int messageId, int recipientId, DateTime? deliveredAt, CancellationToken cancellationToken);
     Task<bool> MarkReadAsync(int messageId, int recipientId, DateTime? readAt, CancellationToken cancellationToken);
+    Task UpdateMessageStatusesAsync(
+        int recipientId,
+        IReadOnlyCollection<int> deliveredMessageIds,
+        IReadOnlyCollection<int> readMessageIds,
+        DateTime? deliveredAt,
+        DateTime? readAt,
+        CancellationToken cancellationToken);
 }

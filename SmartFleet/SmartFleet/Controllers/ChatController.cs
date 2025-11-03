@@ -136,6 +136,33 @@ public class ChatController(
         return updated ? NoContent() : NotFound();
     }
 
+    [HttpPost("messages/status")]
+    public async Task<IActionResult> UpdateMessageStatuses([FromBody] ChatMessageStatusBatchUpdateDto request, CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var userId))
+        {
+            return Unauthorized();
+        }
+
+        var deliveredIds = request.DeliveredMessageIds ?? Array.Empty<int>();
+        var readIds = request.ReadMessageIds ?? Array.Empty<int>();
+
+        if (deliveredIds.Count == 0 && readIds.Count == 0)
+        {
+            return NoContent();
+        }
+
+        await _chatService.UpdateMessageStatusesAsync(
+            userId,
+            deliveredIds,
+            readIds,
+            request.DeliveredAt,
+            request.ReadAt,
+            cancellationToken);
+
+        return NoContent();
+    }
+
     private bool TryGetUserId(out int userId)
     {
         var claim = User.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? User.FindFirstValue(ClaimTypes.NameIdentifier);

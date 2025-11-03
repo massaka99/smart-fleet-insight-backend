@@ -51,6 +51,14 @@ public class ChatMessageDeliveryUpdateDto
     public DateTime? ReadAt { get; init; }
 }
 
+public class ChatMessageStatusBatchUpdateDto
+{
+    public IReadOnlyCollection<int> DeliveredMessageIds { get; init; } = Array.Empty<int>();
+    public IReadOnlyCollection<int> ReadMessageIds { get; init; } = Array.Empty<int>();
+    public DateTime? DeliveredAt { get; init; }
+    public DateTime? ReadAt { get; init; }
+}
+
 public static class ChatMappingExtensions
 {
     public static ChatThreadDto ToChatThreadDto(this ChatThread thread, User requester, IEnumerable<ChatMessage> messages) => new()
