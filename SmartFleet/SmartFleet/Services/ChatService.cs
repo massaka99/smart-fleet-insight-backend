@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -177,6 +178,125 @@ public class ChatService(ApplicationDbContext context, ILogger<ChatService> logg
         await _context.SaveChangesAsync(cancellationToken);
         await BroadcastAsync(() => _notifier.MessageReadAsync(message, cancellationToken));
         return true;
+    }
+
+    public async Task UpdateMessageStatusesAsync(
+        int recipientId,
+        IReadOnlyCollection<int> deliveredMessageIds,
+        IReadOnlyCollection<int> readMessageIds,
+        DateTime? deliveredAt,
+        DateTime? readAt,
+        CancellationToken cancellationToken)
+    {
+        var deliveredSet = deliveredMessageIds?
+            .Where(id => id > 0)
+            .ToHashSet() ?? new HashSet<int>();
+        var readSet = readMessageIds?
+            .Where(id => id > 0)
+            .ToHashSet() ?? new HashSet<int>();
+
+        if (deliveredSet.Count == 0 && readSet.Count == 0)
+        {
+            return;
+        }
+
+        var targetIds = new HashSet<int>(deliveredSet);
+        targetIds.UnionWith(readSet);
+
+        var messages = await _context.ChatMessages
+            .Where(m => targetIds.Contains(m.Id))
+            .ToListAsync(cancellationToken);
+
+        if (messages.Count == 0)
+        {
+            return;
+        }
+
+        var deliveredNotifications = new List<ChatMessage>();
+        var readNotifications = new List<ChatMessage>();
+        var now = DateTime.UtcNow;
+        var effectiveDeliveredAt = deliveredAt ?? now;
+        var effectiveReadAt = readAt ?? now;
+        var updated = false;
+
+        foreach (var message in messages)
+        {
+            if (message.RecipientId != recipientId || message.Status == ChatMessageStatus.Failed)
+            {
+                continue;
+            }
+
+            var isReadTarget = readSet.Contains(message.Id);
+            var isDeliveredTarget = !isReadTarget && deliveredSet.Contains(message.Id);
+            var changed = false;
+
+            if (isReadTarget)
+            {
+                if (message.Status != ChatMessageStatus.Read)
+                {
+                    message.Status = ChatMessageStatus.Read;
+                    changed = true;
+                }
+
+                if (message.ReadAt is null || message.ReadAt < effectiveReadAt)
+                {
+                    message.ReadAt = effectiveReadAt;
+                    changed = true;
+                }
+
+                if (message.DeliveredAt is null || message.DeliveredAt < effectiveDeliveredAt)
+                {
+                    message.DeliveredAt = effectiveDeliveredAt;
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    readNotifications.Add(message);
+                }
+            }
+            else if (isDeliveredTarget)
+            {
+                if (message.Status == ChatMessageStatus.Sent)
+                {
+                    message.Status = ChatMessageStatus.Delivered;
+                    changed = true;
+                }
+
+                if (message.DeliveredAt is null || message.DeliveredAt < effectiveDeliveredAt)
+                {
+                    message.DeliveredAt = effectiveDeliveredAt;
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    deliveredNotifications.Add(message);
+                }
+            }
+
+            if (changed)
+            {
+                updated = true;
+            }
+        }
+
+        if (!updated)
+        {
+            return;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        foreach (var message in deliveredNotifications)
+        {
+            await BroadcastAsync(() => _notifier.MessageDeliveredAsync(message, cancellationToken));
+        }
+
+        foreach (var message in readNotifications)
+        {
+            await BroadcastAsync(() => _notifier.MessageReadAsync(message, cancellationToken));
+        }
     }
 
     private async Task BroadcastAsync(Func<Task> notifierAction)

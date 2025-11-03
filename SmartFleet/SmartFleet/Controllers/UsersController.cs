@@ -140,26 +140,37 @@ public class UsersController(
             return NotFound();
         }
 
-        using var memoryStream = new MemoryStream();
-        await file.CopyToAsync(memoryStream, cancellationToken);
+        var webRoot = ResolveWebRootPath();
+        var uploadsRoot = Path.Combine(webRoot, "uploads", "users", userId.ToString());
+        Directory.CreateDirectory(uploadsRoot);
 
-        if (memoryStream.Length == 0)
+        var sanitizedExtension = extension.ToLowerInvariant();
+        var fileName = $"{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}{sanitizedExtension}";
+        var physicalPath = Path.Combine(uploadsRoot, fileName);
+        string relativeUrl = $"/uploads/users/{userId}/{fileName}";
+
+        try
         {
-            return BadRequest(new { message = "Uploaded file is empty." });
+            await using var targetStream = System.IO.File.Create(physicalPath);
+            await file.CopyToAsync(targetStream, cancellationToken);
+        }
+        catch
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to store profile image." });
         }
 
-        var payload = Convert.ToBase64String(memoryStream.ToArray());
-        var contentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
-        var dataUrl = $"data:{contentType};base64,{payload}";
+        var previousImageUrl = user.ProfileImageUrl;
+        var updatedUser = await _userService.UpdateProfileImageAsync(userId, relativeUrl, cancellationToken);
 
-        var updatedUser = await _userService.UpdateProfileImageAsync(userId, dataUrl, cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(user.ProfileImageUrl))
+        if (updatedUser is null)
         {
-            TryDeleteProfileImage(user.ProfileImageUrl);
+            TryDeleteProfileImage(relativeUrl);
+            return NotFound();
         }
 
-        return updatedUser is null ? NotFound() : Ok(updatedUser.ToUserDto());
+        TryDeleteProfileImage(previousImageUrl);
+
+        return Ok(updatedUser.ToUserDto());
     }
 
     [HttpPut("me/password")]
