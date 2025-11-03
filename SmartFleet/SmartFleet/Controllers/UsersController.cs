@@ -140,28 +140,25 @@ public class UsersController(
             return NotFound();
         }
 
-        var webRoot = ResolveWebRootPath();
-        var uploadsRoot = Path.Combine(webRoot, "uploads", "users");
-        Directory.CreateDirectory(uploadsRoot);
+        using var memoryStream = new MemoryStream();
+        await file.CopyToAsync(memoryStream, cancellationToken);
 
-        var safeFileName = $"{userId}_{Guid.NewGuid():N}{extension.ToLowerInvariant()}";
-        var destinationPath = Path.Combine(uploadsRoot, safeFileName);
-
-        await using (var stream = System.IO.File.Create(destinationPath))
+        if (memoryStream.Length == 0)
         {
-            await file.CopyToAsync(stream, cancellationToken);
+            return BadRequest(new { message = "Uploaded file is empty." });
         }
 
-        var relativePath = $"/uploads/users/{safeFileName}";
+        var payload = Convert.ToBase64String(memoryStream.ToArray());
+        var contentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
+        var dataUrl = $"data:{contentType};base64,{payload}";
 
-        await _userService.UpdateProfileImageAsync(userId, relativePath, cancellationToken);
+        var updatedUser = await _userService.UpdateProfileImageAsync(userId, dataUrl, cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(user.ProfileImageUrl))
         {
             TryDeleteProfileImage(user.ProfileImageUrl);
         }
 
-        var updatedUser = await _userService.GetByIdAsync(userId, cancellationToken);
         return updatedUser is null ? NotFound() : Ok(updatedUser.ToUserDto());
     }
 
@@ -235,9 +232,20 @@ public class UsersController(
             return;
         }
 
+        var trimmed = profileImageUrl.Trim();
+        if (trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var absoluteUri) && absoluteUri.Scheme != Uri.UriSchemeFile)
+        {
+            return;
+        }
+
         var webRoot = ResolveWebRootPath();
         var uploadsRoot = Path.Combine(webRoot, "uploads", "users");
-        var sanitizedRelative = profileImageUrl.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        var sanitizedRelative = trimmed.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
         var candidatePath = Path.GetFullPath(Path.Combine(webRoot, sanitizedRelative));
         var uploadsRootFull = Path.GetFullPath(uploadsRoot);
 
