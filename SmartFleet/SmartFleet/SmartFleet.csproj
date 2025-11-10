@@ -32,4 +32,8 @@
       </Content>
     </ItemGroup>
 
+    <ItemGroup>
+        <InternalsVisibleTo Include="SmartFleet.Tests" />
+    </ItemGroup>
+
 </Project>
