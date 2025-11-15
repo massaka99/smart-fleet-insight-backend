@@ -84,6 +84,9 @@ public class VehicleTelemetryPayload
 
     [JsonPropertyName("stops")]
     public IReadOnlyList<VehicleTelemetryStop> Stops { get; set; } = Array.Empty<VehicleTelemetryStop>();
+
+    [JsonPropertyName("driver")]
+    public VehicleTelemetryDriverPayload? Driver { get; set; }
 }
 
 public class VehicleTelemetryPosition
@@ -93,6 +96,21 @@ public class VehicleTelemetryPosition
 
     [JsonPropertyName("lon")]
     public double Lon { get; set; }
+}
+
+public class VehicleTelemetryDriverPayload
+{
+    [JsonPropertyName("user_id")]
+    public int? UserId { get; set; }
+
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
+
+    [JsonPropertyName("first_name")]
+    public string? FirstName { get; set; }
+
+    [JsonPropertyName("last_name")]
+    public string? LastName { get; set; }
 }
 
 public class VehicleTelemetryStop

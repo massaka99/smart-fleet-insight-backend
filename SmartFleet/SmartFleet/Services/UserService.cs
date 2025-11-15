@@ -14,6 +14,7 @@ public class UserService(ApplicationDbContext context, IPasswordHasher<User> pas
     public async Task<IReadOnlyCollection<User>> GetAllAsync(CancellationToken cancellationToken)
     {
         return await _context.Users
+            .Include(u => u.Vehicle)
             .AsNoTracking()
             .OrderBy(u => u.Id)
             .ToListAsync(cancellationToken);
@@ -22,6 +23,7 @@ public class UserService(ApplicationDbContext context, IPasswordHasher<User> pas
     public async Task<User?> GetByIdAsync(int id, CancellationToken cancellationToken)
     {
         return await _context.Users
+            .Include(u => u.Vehicle)
             .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
     }
@@ -30,6 +32,7 @@ public class UserService(ApplicationDbContext context, IPasswordHasher<User> pas
     {
         var normalizedEmail = NormalizeEmail(email);
         return await _context.Users
+            .Include(u => u.Vehicle)
             .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
     }
@@ -51,7 +54,9 @@ public class UserService(ApplicationDbContext context, IPasswordHasher<User> pas
 
     public async Task<User?> UpdateRoleAsync(int id, UserRole role, CancellationToken cancellationToken)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+        var user = await _context.Users
+            .Include(u => u.Vehicle)
+            .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
 
         if (user is null)
         {
@@ -69,7 +74,9 @@ public class UserService(ApplicationDbContext context, IPasswordHasher<User> pas
 
     public async Task<UserProfileUpdateResult> UpdateProfileAsync(int userId, UserProfileUpdateDto dto, CancellationToken cancellationToken)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+        var user = await _context.Users
+            .Include(u => u.Vehicle)
+            .FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
 
         if (user is null)
         {
@@ -101,7 +108,9 @@ public class UserService(ApplicationDbContext context, IPasswordHasher<User> pas
 
     public async Task<User?> UpdateProfileImageAsync(int userId, string? profileImagePath, CancellationToken cancellationToken)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+        var user = await _context.Users
+            .Include(u => u.Vehicle)
+            .FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
 
         if (user is null)
         {
@@ -116,7 +125,9 @@ public class UserService(ApplicationDbContext context, IPasswordHasher<User> pas
 
     public async Task<UserPasswordUpdateResult> UpdatePasswordAsync(int userId, UserPasswordUpdateDto dto, CancellationToken cancellationToken)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+        var user = await _context.Users
+            .Include(u => u.Vehicle)
+            .FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
 
         if (user is null)
         {
@@ -151,11 +162,30 @@ public class UserService(ApplicationDbContext context, IPasswordHasher<User> pas
 
     public async Task<bool> DeleteAsync(int id, CancellationToken cancellationToken)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+        var user = await _context.Users
+            .Include(u => u.Vehicle)
+            .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
 
         if (user is null)
         {
             return false;
+        }
+
+        if (user.Vehicle is not null)
+        {
+            user.Vehicle.Driver = null;
+            user.Vehicle.UpdatedAt = DateTime.UtcNow;
+            user.Vehicle = null;
+            user.VehicleId = null;
+        }
+
+        var threads = await _context.ChatThreads
+            .Where(t => t.ParticipantAId == id || t.ParticipantBId == id)
+            .ToListAsync(cancellationToken);
+
+        if (threads.Count > 0)
+        {
+            _context.ChatThreads.RemoveRange(threads);
         }
 
         _context.Users.Remove(user);

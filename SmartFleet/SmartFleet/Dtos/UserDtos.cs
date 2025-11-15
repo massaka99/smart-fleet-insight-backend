@@ -14,6 +14,18 @@ public class UserDto
     public int Age { get; init; }
     public UserRole Role { get; init; }
     public IReadOnlyCollection<string> Permissions { get; init; } = Array.Empty<string>();
+    public UserVehicleSummaryDto? AssignedVehicle { get; init; }
+}
+
+public class UserVehicleSummaryDto
+{
+    public int Id { get; init; }
+    public string LicensePlate { get; init; } = string.Empty;
+    public string VehicleType { get; init; } = string.Empty;
+    public string Brand { get; init; } = string.Empty;
+    public string? RouteSummary { get; init; }
+    public string Status { get; init; } = string.Empty;
+    public string? ExternalId { get; init; }
 }
 
 public class UserProfileUpdateDto
@@ -87,10 +99,22 @@ public static class UserMappingExtensions
         FirstName = user.FirstName,
         LastName = user.LastName,
         Email = user.Email,
-        ProfileImageUrl = user.ProfileImageUrl,
+        ProfileImageUrl = ProfileImageSanitizer.Normalize(user.ProfileImageUrl),
         Age = user.Age,
         Role = user.Role,
-        Permissions = RolePermissions.GetPermissions(user.Role)
+        Permissions = RolePermissions.GetPermissions(user.Role),
+        AssignedVehicle = user.Vehicle?.ToUserVehicleSummaryDto()
+    };
+
+    public static UserVehicleSummaryDto ToUserVehicleSummaryDto(this Vehicle vehicle) => new()
+    {
+        Id = vehicle.Id,
+        LicensePlate = vehicle.LicensePlate,
+        VehicleType = vehicle.VehicleType,
+        Brand = vehicle.Brand,
+        RouteSummary = string.IsNullOrWhiteSpace(vehicle.RouteSummary) ? null : vehicle.RouteSummary,
+        Status = vehicle.Status,
+        ExternalId = vehicle.ExternalId
     };
 }
 

@@ -473,7 +473,127 @@ public class VehicleTelemetryIngestionService : BackgroundService
             byLicensePlate[plateKey] = vehicle;
         }
 
+        if (payload.Driver is not null)
+        {
+            await AssignDriverAsync(dbContext, vehicle, payload.Driver, cancellationToken);
+        }
+        else
+        {
+            await EnsureDriverAssignmentAsync(dbContext, vehicle, cancellationToken);
+        }
+
         return vehicle;
+    }
+
+    private async Task AssignDriverAsync(
+        ApplicationDbContext dbContext,
+        Vehicle vehicle,
+        VehicleTelemetryDriverPayload driverPayload,
+        CancellationToken cancellationToken)
+    {
+        var user = await ResolveDriverAsync(dbContext, driverPayload, cancellationToken);
+        if (user is null)
+        {
+            return;
+        }
+
+        if (user.Role != UserRole.Driver)
+        {
+            _logger.LogDebug("Telemetry payload referenced user {UserId}, but the user is not a driver.", user.Id);
+            return;
+        }
+
+        var vehicleDriverEntry = dbContext.Entry(vehicle).Reference(v => v.Driver);
+        if (!vehicleDriverEntry.IsLoaded)
+        {
+            await vehicleDriverEntry.LoadAsync(cancellationToken);
+        }
+
+        if (vehicle.Driver?.Id == user.Id)
+        {
+            return;
+        }
+
+        if (vehicle.Driver is not null && vehicle.Driver.Id != user.Id)
+        {
+            vehicle.Driver.VehicleId = null;
+            vehicle.Driver.Vehicle = null;
+        }
+
+        if (user.VehicleId.HasValue && user.VehicleId != vehicle.Id)
+        {
+            var previousVehicle = await dbContext.Vehicles
+                .FirstOrDefaultAsync(v => v.Id == user.VehicleId.Value, cancellationToken);
+            if (previousVehicle is not null)
+            {
+                previousVehicle.Driver = null;
+                previousVehicle.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
+        user.VehicleId = vehicle.Id;
+        user.Vehicle = vehicle;
+        vehicle.Driver = user;
+        vehicle.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private async Task EnsureDriverAssignmentAsync(
+        ApplicationDbContext dbContext,
+        Vehicle vehicle,
+        CancellationToken cancellationToken)
+    {
+        var driverEntry = dbContext.Entry(vehicle).Reference(v => v.Driver);
+        if (!driverEntry.IsLoaded)
+        {
+            await driverEntry.LoadAsync(cancellationToken);
+        }
+
+        if (vehicle.Driver is not null)
+        {
+            return;
+        }
+
+        var availableDriver = await dbContext.Users
+            .Where(u => u.Role == UserRole.Driver && u.VehicleId == null)
+            .OrderBy(u => u.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (availableDriver is null)
+        {
+            return;
+        }
+
+        availableDriver.VehicleId = vehicle.Id;
+        availableDriver.Vehicle = vehicle;
+        vehicle.Driver = availableDriver;
+        vehicle.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private async Task<User?> ResolveDriverAsync(
+        ApplicationDbContext dbContext,
+        VehicleTelemetryDriverPayload payload,
+        CancellationToken cancellationToken)
+    {
+        if (payload.UserId is int userId && userId > 0)
+        {
+            var user = await dbContext.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+            if (user is not null)
+            {
+                return user;
+            }
+        }
+
+        var normalizedEmail = payload.Email?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(normalizedEmail))
+        {
+            var user = await dbContext.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
+            if (user is not null)
+            {
+                return user;
+            }
+        }
+
+        return null;
     }
 
     private async Task BroadcastVehicleUpdateAsync(ApplicationDbContext dbContext, Vehicle vehicle, CancellationToken cancellationToken)

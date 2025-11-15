@@ -3,10 +3,11 @@ using System.Net.Mail;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
-using SmartFleet.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SmartFleet.Authorization;
 using SmartFleet.Data;
+using SmartFleet.Dtos;
 using SmartFleet.Models;
 using SmartFleet.Models.Auth;
 using SmartFleet.Services;
@@ -27,7 +28,6 @@ public class AuthController(
     private readonly ITokenService _tokenService = tokenService;
     private readonly IOtpService _otpService = otpService;
     private readonly IUserSessionTracker _sessionTracker = sessionTracker;
-    private const string SingleSessionConflictMessage = "Brugeren er allerede logget ind på en anden enhed.";
 
     [HttpPost("register")]
     [Authorize(Policy = "RoleAdminAccess")]
@@ -97,10 +97,7 @@ public class AuthController(
         }
 
         var token = _tokenService.GenerateToken(user, Guid.NewGuid());
-        if (!_sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt))
-        {
-            return Conflict(new { message = SingleSessionConflictMessage });
-        }
+        _sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt);
 
         return Created($"/api/users/{user.Id}", CreateLoginResponse(user, token.Token));
     }
@@ -134,10 +131,7 @@ public class AuthController(
         }
 
         var token = _tokenService.GenerateToken(user, Guid.NewGuid());
-        if (!_sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt))
-        {
-            return Conflict(new { message = SingleSessionConflictMessage });
-        }
+        _sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt);
 
         return Ok(CreateLoginResponse(user, token.Token));
     }
@@ -178,10 +172,7 @@ public class AuthController(
         }
 
         var token = _tokenService.GenerateToken(user, Guid.NewGuid());
-        if (!_sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt))
-        {
-            return Conflict(new { message = SingleSessionConflictMessage });
-        }
+        _sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt);
 
         return Ok(CreateLoginResponse(user, token.Token));
     }
@@ -267,23 +258,13 @@ public class AuthController(
 
         var token = _tokenService.GenerateToken(user, sessionId);
 
-        bool sessionValidated;
         if (hasExistingSession)
         {
-            sessionValidated = _sessionTracker.RenewSession(user.Id, token.SessionId, token.ExpiresAt);
-            if (!sessionValidated)
-            {
-                sessionValidated = _sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt);
-            }
+            _sessionTracker.RenewSession(user.Id, token.SessionId, token.ExpiresAt);
         }
         else
         {
-            sessionValidated = _sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt);
-        }
-
-        if (!sessionValidated)
-        {
-            return Conflict(new { message = SingleSessionConflictMessage });
+            _sessionTracker.TryBeginSession(user.Id, token.SessionId, token.ExpiresAt);
         }
 
         return Ok(CreateLoginResponse(user, token.Token));
@@ -294,7 +275,7 @@ public class AuthController(
         user.FirstName,
         user.LastName,
         user.Email,
-        user.ProfileImageUrl,
+        ProfileImageSanitizer.Normalize(user.ProfileImageUrl),
         user.Age,
         user.Role,
         RolePermissions.GetPermissions(user.Role),

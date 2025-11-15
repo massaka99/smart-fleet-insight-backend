@@ -1,4 +1,7 @@
+using System;
 using System.Linq;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SmartFleet.Dtos;
 using SmartFleet.Services;
@@ -7,9 +10,12 @@ namespace SmartFleet.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class VehiclesController(IVehicleService vehicleService) : ControllerBase
+public class VehiclesController(
+    IVehicleService vehicleService,
+    IVehicleCommandPublisher vehicleCommandPublisher) : ControllerBase
 {
     private readonly IVehicleService _vehicleService = vehicleService;
+    private readonly IVehicleCommandPublisher _vehicleCommandPublisher = vehicleCommandPublisher;
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<VehicleDto>>> GetVehicles(CancellationToken cancellationToken)
@@ -107,5 +113,85 @@ public class VehiclesController(IVehicleService vehicleService) : ControllerBase
             VehicleDriverRemovalStatus.NoDriverAssigned => NoContent(),
             _ => Problem("Unexpected removal status.")
         };
+    }
+
+    [HttpPost("{id:int}/route")]
+    [Authorize(Policy = "MapsAccess")]
+    public async Task<IActionResult> UpdateVehicleRoute(
+        int id,
+        [FromBody] VehicleRouteUpdateRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        if (request.Stops is null || request.Stops.Count < 2)
+        {
+            ModelState.AddModelError(nameof(request.Stops), "At least two stops are required to build a route.");
+            return ValidationProblem(ModelState);
+        }
+
+        var vehicle = await _vehicleService.GetByIdAsync(id, cancellationToken);
+        if (vehicle is null)
+        {
+            return NotFound();
+        }
+
+        var externalId = string.IsNullOrWhiteSpace(vehicle.ExternalId)
+            ? null
+            : vehicle.ExternalId.Trim();
+
+        if (string.IsNullOrWhiteSpace(externalId))
+        {
+            return BadRequest("Vehicle does not have an external identifier needed to control the simulator.");
+        }
+
+        var stops = request.Stops
+            .Select((stop, index) => new VehicleRouteCommandStop(
+                string.IsNullOrWhiteSpace(stop.Name) ? $"Stop {index + 1}" : stop.Name.Trim(),
+                stop.Latitude,
+                stop.Longitude))
+            .ToList();
+
+        var requestId = Guid.NewGuid().ToString("N");
+
+        VehicleRouteCommandRequester? requester = null;
+        var userIdValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        int? userId = int.TryParse(userIdValue, out var parsedUserId) ? parsedUserId : null;
+        var displayName = User.Identity?.Name;
+        var email = User.FindFirstValue(ClaimTypes.Email);
+
+        if (userId.HasValue || !string.IsNullOrWhiteSpace(displayName) || !string.IsNullOrWhiteSpace(email))
+        {
+            requester = new VehicleRouteCommandRequester(userId, displayName, email);
+        }
+
+        var payload = new VehicleRouteCommandPayload(externalId, stops)
+        {
+            LicensePlate = vehicle.LicensePlate,
+            RouteLabel = string.IsNullOrWhiteSpace(request.RouteLabel) ? null : request.RouteLabel.Trim(),
+            BaseSpeedKmh = request.BaseSpeedKmh,
+            RequestId = requestId,
+            RequestedBy = requester
+        };
+
+        await _vehicleCommandPublisher.PublishRouteUpdateAsync(payload, cancellationToken);
+        await _vehicleService.ApplyRoutePreviewAsync(
+            vehicle.Id,
+            stops,
+            request.BaseSpeedKmh,
+            payload.RouteLabel,
+            requestId,
+            cancellationToken);
+
+        return Accepted(new
+        {
+            requestId,
+            vehicleId = vehicle.Id,
+            externalId,
+            stops = stops.Count
+        });
     }
 }

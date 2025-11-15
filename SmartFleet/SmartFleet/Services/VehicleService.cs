@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Linq;
 using SmartFleet.Data;
 using SmartFleet.Dtos;
 using SmartFleet.Models;
@@ -168,6 +169,60 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
         return true;
     }
 
+    public async Task ApplyRoutePreviewAsync(
+        int vehicleId,
+        IReadOnlyList<VehicleRouteCommandStop> stops,
+        double? baseSpeedKmh,
+        string? routeLabel,
+        string? requestId,
+        CancellationToken cancellationToken)
+    {
+        var vehicle = await _context.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, cancellationToken);
+        if (vehicle is null || stops.Count < 2)
+        {
+            return;
+        }
+
+        var summary = BuildRouteSummary(stops, routeLabel);
+        if (!string.IsNullOrWhiteSpace(summary))
+        {
+            vehicle.RouteSummary = summary;
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestId))
+        {
+            vehicle.RouteId = requestId.Trim();
+        }
+
+        var distanceKm = CalculateRouteDistanceKm(stops);
+        double? safeDistanceKm = null;
+        if (distanceKm.HasValue)
+        {
+            safeDistanceKm = Math.Max(distanceKm.Value, 0);
+            vehicle.RouteDistanceKm = safeDistanceKm.Value;
+            vehicle.DistanceRemainingM = Math.Max(0, safeDistanceKm.Value * 1000);
+            vehicle.DistanceTravelledM = 0;
+            vehicle.Progress = 0;
+        }
+
+        if (baseSpeedKmh.HasValue && baseSpeedKmh.Value > 0)
+        {
+            vehicle.BaseSpeedKmh = baseSpeedKmh.Value;
+            if (safeDistanceKm.HasValue)
+            {
+                var etaHours = safeDistanceKm.Value <= 0
+                    ? 0
+                    : safeDistanceKm.Value / baseSpeedKmh.Value;
+                vehicle.EtaSeconds = Math.Max(0, etaHours * 3600);
+            }
+        }
+
+        vehicle.Status = string.IsNullOrWhiteSpace(vehicle.Status) ? "pending_route_update" : vehicle.Status;
+        vehicle.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<VehicleDriverAssignmentResult> AssignDriverAsync(int vehicleId, int userId, CancellationToken cancellationToken)
     {
         var vehicle = await _context.Vehicles
@@ -238,4 +293,59 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
 
         return VehicleDriverRemovalResult.Success();
     }
+
+    private static double? CalculateRouteDistanceKm(IReadOnlyList<VehicleRouteCommandStop> stops)
+    {
+        if (stops.Count < 2)
+        {
+            return null;
+        }
+
+        double total = 0;
+        for (var index = 1; index < stops.Count; index += 1)
+        {
+            var previous = stops[index - 1];
+            var current = stops[index];
+            total += Haversine(previous.Latitude, previous.Longitude, current.Latitude, current.Longitude);
+        }
+
+        if (double.IsNaN(total) || double.IsInfinity(total))
+        {
+            return null;
+        }
+
+        return Math.Max(0, Math.Round(total, 3));
+    }
+
+    private static string? BuildRouteSummary(IReadOnlyList<VehicleRouteCommandStop> stops, string? overrideLabel)
+    {
+        if (!string.IsNullOrWhiteSpace(overrideLabel))
+        {
+            return overrideLabel.Trim();
+        }
+
+        var names = stops.Select(stop => stop.Name?.Trim())
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToArray();
+
+        return names.Length > 0 ? string.Join(" -> ", names) : null;
+    }
+
+    private static double Haversine(double fromLat, double fromLng, double toLat, double toLng)
+    {
+        const double EarthRadiusKm = 6371.0;
+        var dLat = DegreesToRadians(toLat - fromLat);
+        var dLng = DegreesToRadians(toLng - fromLng);
+
+        var fromLatRad = DegreesToRadians(fromLat);
+        var toLatRad = DegreesToRadians(toLat);
+
+        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                Math.Cos(fromLatRad) * Math.Cos(toLatRad) *
+                Math.Sin(dLng / 2) * Math.Sin(dLng / 2);
+        var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+        return EarthRadiusKm * c;
+    }
+
+    private static double DegreesToRadians(double value) => value * Math.PI / 180.0;
 }
