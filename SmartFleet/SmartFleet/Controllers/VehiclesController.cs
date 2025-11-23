@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SmartFleet.Dtos;
+using SmartFleet.Models;
 using SmartFleet.Services;
 
 namespace SmartFleet.Controllers;
@@ -122,6 +123,10 @@ public class VehiclesController(
         [FromBody] VehicleRouteUpdateRequest request,
         CancellationToken cancellationToken)
     {
+        var userIdValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        int? userId = int.TryParse(userIdValue, out var parsedUserId) ? parsedUserId : null;
+        var isDriver = User.IsInRole(UserRole.Driver.ToString());
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
@@ -137,6 +142,11 @@ public class VehiclesController(
         if (vehicle is null)
         {
             return NotFound();
+        }
+
+        if (isDriver && (!userId.HasValue || vehicle.Driver?.Id != userId.Value))
+        {
+            return Forbid();
         }
 
         var externalId = string.IsNullOrWhiteSpace(vehicle.ExternalId)
@@ -158,8 +168,6 @@ public class VehiclesController(
         var requestId = Guid.NewGuid().ToString("N");
 
         VehicleRouteCommandRequester? requester = null;
-        var userIdValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        int? userId = int.TryParse(userIdValue, out var parsedUserId) ? parsedUserId : null;
         var displayName = User.Identity?.Name;
         var email = User.FindFirstValue(ClaimTypes.Email);
 

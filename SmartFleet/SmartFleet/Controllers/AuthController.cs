@@ -111,7 +111,7 @@ public class AuthController(
             return Unauthorized();
         }
 
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
+        var user = await _context.Users.Include(u => u.Vehicle).FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
 
         if (user is null)
         {
@@ -145,7 +145,7 @@ public class AuthController(
             return Unauthorized();
         }
 
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
+        var user = await _context.Users.Include(u => u.Vehicle).FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
 
         if (user is null)
         {
@@ -186,7 +186,7 @@ public class AuthController(
             return NoContent();
         }
 
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
+        var user = await _context.Users.Include(u => u.Vehicle).FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
         if (user is null)
         {
             return NoContent();
@@ -234,7 +234,7 @@ public class AuthController(
             return ValidationProblem(ModelState);
         }
 
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+        var user = await _context.Users.Include(u => u.Vehicle).FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
 
         if (user is null)
         {
@@ -280,6 +280,7 @@ public class AuthController(
         user.Role,
         RolePermissions.GetPermissions(user.Role),
         user.RequiresPasswordReset,
+        user.Vehicle?.ToUserVehicleSummaryDto(),
         token);
 
     private static bool TryNormalizeEmail(string email, out string normalizedEmail)
