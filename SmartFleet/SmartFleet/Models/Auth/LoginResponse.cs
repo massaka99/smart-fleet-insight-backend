@@ -1,4 +1,5 @@
 using SmartFleet.Authorization;
+using SmartFleet.Dtos;
 using SmartFleet.Models;
 
 namespace SmartFleet.Models.Auth;
@@ -13,6 +14,7 @@ public record LoginResponse(
     UserRole Role,
     IReadOnlyCollection<string> Permissions,
     bool RequiresPasswordReset,
+    UserVehicleSummaryDto? AssignedVehicle,
     string Token);
 
 

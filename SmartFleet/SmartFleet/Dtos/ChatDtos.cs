@@ -94,7 +94,7 @@ public static class ChatMappingExtensions
         FirstName = user.FirstName,
         LastName = user.LastName,
         Email = user.Email,
-        ProfileImageUrl = user.ProfileImageUrl
+        ProfileImageUrl = ProfileImageSanitizer.Normalize(user.ProfileImageUrl)
     };
 
     private static User GetOtherParticipant(ChatThread thread, User requester)

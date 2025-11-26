@@ -12,6 +12,13 @@ public interface IVehicleService
     Task<bool> DeleteAsync(int id, CancellationToken cancellationToken);
     Task<VehicleDriverAssignmentResult> AssignDriverAsync(int vehicleId, int userId, CancellationToken cancellationToken);
     Task<VehicleDriverRemovalResult> RemoveDriverAsync(int vehicleId, CancellationToken cancellationToken);
+    Task ApplyRoutePreviewAsync(
+        int vehicleId,
+        IReadOnlyList<VehicleRouteCommandStop> stops,
+        double? baseSpeedKmh,
+        string? routeLabel,
+        string? requestId,
+        CancellationToken cancellationToken);
 }
 
 public enum VehicleDriverAssignmentStatus
