@@ -4,11 +4,16 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace SmartFleet.Services;
 
-internal sealed class UserSessionTracker(IMemoryCache cache) : IUserSessionTracker
+internal sealed class UserSessionTracker : IUserSessionTracker
 {
-    private readonly IMemoryCache _cache = cache;
+    private readonly IMemoryCache _cache;
     private static readonly TimeSpan CleanupGracePeriod = TimeSpan.FromMinutes(5);
     private readonly ConcurrentDictionary<int, object> _locks = new();
+
+    public UserSessionTracker(IMemoryCache cache)
+    {
+        _cache = cache;
+    }
 
     public bool TryBeginSession(int userId, Guid sessionId, DateTime expiresAt)
     {
