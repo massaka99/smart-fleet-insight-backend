@@ -117,6 +117,49 @@ public class OtpServiceTests
         await action.Should().ThrowAsync<InvalidOperationException>();
     }
 
+    [Fact]
+    public async Task SendOtpAsync_PersistsOtpAndDispatchesEmail()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        using var context = CreateContext();
+        var completion = new TaskCompletionSource<(string TemplateId, string Code, string ToEmail)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var emailSender = new Mock<IEmailSender>();
+        emailSender
+            .Setup(s => s.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, object, CancellationToken>((to, templateId, payload, _) =>
+            {
+                var code = payload.GetType().GetProperty("code")?.GetValue(payload)?.ToString() ?? string.Empty;
+                completion.TrySetResult((templateId, code, to));
+                return Task.CompletedTask;
+            });
+
+        var otpOptions = new OtpOptions { CodeLength = 6, ExpiresInMinutes = 7 };
+        var sendGridOptions = new SendGridOptions { OtpTemplateId = "otp-template" };
+        var service = CreateService(context, cache, otpOptions, sendGridOptions, emailSender.Object);
+
+        var storedUser = CreateUser(6);
+        context.Users.Add(storedUser);
+        context.SaveChanges();
+        context.Entry(storedUser).State = EntityState.Detached;
+        var user = context.Users.AsNoTracking().Single(u => u.Id == storedUser.Id);
+
+        var ttl = await service.SendOtpAsync(user, CancellationToken.None);
+
+        ttl.Should().Be(TimeSpan.FromMinutes(otpOptions.ExpiresInMinutes));
+
+        var (templateId, code, toEmail) = await completion.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        templateId.Should().Be(sendGridOptions.OtpTemplateId);
+        toEmail.Should().Be(user.Email);
+        code.Should().HaveLength(otpOptions.CodeLength);
+
+        context.ChangeTracker.Clear();
+        var persisted = context.Users.AsNoTracking().Single(u => u.Id == user.Id);
+        persisted.OtpHash.Should().Be(HashOtp(code));
+        persisted.OtpExpiresAt.Should().BeCloseTo(DateTimeOffset.UtcNow.AddMinutes(otpOptions.ExpiresInMinutes), TimeSpan.FromSeconds(5));
+
+        service.VerifyOtp(persisted, code).Should().Be(OtpVerificationStatus.Valid);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
