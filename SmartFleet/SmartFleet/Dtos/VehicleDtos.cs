@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using SmartFleet.Models;
 
 namespace SmartFleet.Dtos;
@@ -33,6 +34,8 @@ public class VehicleDto
     public string Status { get; init; } = string.Empty;
     public DateTime? LastTelemetryAtUtc { get; init; }
     public double KilometersDriven { get; init; }
+
+    [JsonPropertyName("co2Emission")]
     public double CO2Emission { get; init; }
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }

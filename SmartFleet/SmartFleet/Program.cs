@@ -86,6 +86,7 @@ builder.Services.Configure<JwtOptions>(jwtSection);
 builder.Services.Configure<OtpOptions>(builder.Configuration.GetSection("Otp"));
 builder.Services.Configure<SendGridOptions>(builder.Configuration.GetSection("SendGrid"));
 builder.Services.Configure<TelemetryIngestionOptions>(builder.Configuration.GetSection("TelemetryIngestion"));
+builder.Services.Configure<VehicleCommandOptions>(builder.Configuration.GetSection("VehicleCommands"));
 
 builder.Services.AddAuthentication(options =>
     {
@@ -169,6 +170,7 @@ builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<IChatService, ChatService>();
 builder.Services.AddScoped<IChatNotifier, SignalRChatNotifier>();
 builder.Services.AddScoped<IVehicleService, VehicleService>();
+builder.Services.AddScoped<IVehicleCommandPublisher, VehicleCommandPublisher>();
 builder.Services.AddSingleton<ITokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailSender, SendGridEmailSender>();
 builder.Services.AddScoped<IOtpService, OtpService>();

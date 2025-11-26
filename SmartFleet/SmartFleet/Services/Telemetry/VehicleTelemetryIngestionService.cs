@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Channels;
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,6 +34,16 @@ public class VehicleTelemetryIngestionService : BackgroundService
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
     private readonly int _batchSize;
     private readonly TimeSpan _flushInterval;
+    private readonly ConcurrentDictionary<int, ConcurrentDictionary<string, DateTimeOffset>> _alertTracker = new();
+    private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(5);
+    private const double MaxSpeedSaneKmh = 220.0;
+    private const double MinSpeedSaneKmh = 0.0;
+    private const double MinFuelPercent = 0.0;
+    private const double MaxFuelPercent = 100.0;
+    private const double MinLatitude = -90.0;
+    private const double MaxLatitude = 90.0;
+    private const double MinLongitude = -180.0;
+    private const double MaxLongitude = 180.0;
 
     public VehicleTelemetryIngestionService(
         IServiceScopeFactory scopeFactory,
@@ -247,6 +258,12 @@ public class VehicleTelemetryIngestionService : BackgroundService
         {
             try
             {
+                if (HasInvalidCoreTelemetry(envelope, out var reason))
+                {
+                    _logger.LogWarning("Dropping telemetry {TelemetryId} due to invalid {Reason} values.", envelope.Payload.TelemetryId, reason);
+                    continue;
+                }
+
                 var vehicle = await UpsertVehicleAsync(
                     dbContext,
                     envelope,
@@ -458,6 +475,8 @@ public class VehicleTelemetryIngestionService : BackgroundService
             vehicle.UpdatedAt = DateTime.UtcNow;
         }
 
+        NormalizeVehicleTelemetry(vehicle);
+
         if (!string.IsNullOrEmpty(normalizedExternalId))
         {
             byExternalId[normalizedExternalId] = vehicle;
@@ -473,7 +492,223 @@ public class VehicleTelemetryIngestionService : BackgroundService
             byLicensePlate[plateKey] = vehicle;
         }
 
+        if (payload.Driver is not null)
+        {
+            await AssignDriverAsync(dbContext, vehicle, payload.Driver, cancellationToken);
+        }
+        else
+        {
+            await EnsureDriverAssignmentAsync(dbContext, vehicle, cancellationToken);
+        }
+
         return vehicle;
+    }
+
+    private async Task AssignDriverAsync(
+        ApplicationDbContext dbContext,
+        Vehicle vehicle,
+        VehicleTelemetryDriverPayload driverPayload,
+        CancellationToken cancellationToken)
+    {
+        var user = await ResolveDriverAsync(dbContext, driverPayload, cancellationToken);
+        if (user is null)
+        {
+            return;
+        }
+
+        if (user.Role != UserRole.Driver)
+        {
+            _logger.LogDebug("Telemetry payload referenced user {UserId}, but the user is not a driver.", user.Id);
+            return;
+        }
+
+        var vehicleDriverEntry = dbContext.Entry(vehicle).Reference(v => v.Driver);
+        if (!vehicleDriverEntry.IsLoaded)
+        {
+            await vehicleDriverEntry.LoadAsync(cancellationToken);
+        }
+
+        if (vehicle.Driver?.Id == user.Id)
+        {
+            return;
+        }
+
+        if (vehicle.Driver is not null && vehicle.Driver.Id != user.Id)
+        {
+            vehicle.Driver.VehicleId = null;
+            vehicle.Driver.Vehicle = null;
+        }
+
+        if (user.VehicleId.HasValue && user.VehicleId != vehicle.Id)
+        {
+            var previousVehicle = await dbContext.Vehicles
+                .FirstOrDefaultAsync(v => v.Id == user.VehicleId.Value, cancellationToken);
+            if (previousVehicle is not null)
+            {
+                previousVehicle.Driver = null;
+                previousVehicle.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
+        user.VehicleId = vehicle.Id;
+        user.Vehicle = vehicle;
+        vehicle.Driver = user;
+        vehicle.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private async Task EnsureDriverAssignmentAsync(
+        ApplicationDbContext dbContext,
+        Vehicle vehicle,
+        CancellationToken cancellationToken)
+    {
+        var driverEntry = dbContext.Entry(vehicle).Reference(v => v.Driver);
+        if (!driverEntry.IsLoaded)
+        {
+            await driverEntry.LoadAsync(cancellationToken);
+        }
+
+        if (vehicle.Driver is not null)
+        {
+            return;
+        }
+
+        var availableDriver = await dbContext.Users
+            .Where(u => u.Role == UserRole.Driver && u.VehicleId == null)
+            .OrderBy(u => u.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (availableDriver is null)
+        {
+            return;
+        }
+
+        availableDriver.VehicleId = vehicle.Id;
+        availableDriver.Vehicle = vehicle;
+        vehicle.Driver = availableDriver;
+        vehicle.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private async Task<User?> ResolveDriverAsync(
+        ApplicationDbContext dbContext,
+        VehicleTelemetryDriverPayload payload,
+        CancellationToken cancellationToken)
+    {
+        if (payload.UserId is int userId && userId > 0)
+        {
+            var user = await dbContext.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+            if (user is not null)
+            {
+                return user;
+            }
+        }
+
+        var normalizedEmail = payload.Email?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(normalizedEmail))
+        {
+            var user = await dbContext.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
+            if (user is not null)
+            {
+                return user;
+            }
+        }
+
+        return null;
+    }
+
+    private static double Clamp(double value, double min, double max)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+        {
+            return min;
+        }
+        return Math.Min(max, Math.Max(min, value));
+    }
+
+    private void NormalizeVehicleTelemetry(Vehicle vehicle)
+    {
+        vehicle.Latitude = Clamp(vehicle.Latitude, MinLatitude, MaxLatitude);
+        vehicle.Longitude = Clamp(vehicle.Longitude, MinLongitude, MaxLongitude);
+        vehicle.SpeedKmh = Clamp(vehicle.SpeedKmh, MinSpeedSaneKmh, MaxSpeedSaneKmh);
+        vehicle.FuelLevelPercent = Clamp(vehicle.FuelLevelPercent, MinFuelPercent, MaxFuelPercent);
+        vehicle.Progress = Clamp(vehicle.Progress, 0.0, 1.0);
+        vehicle.DistanceRemainingM = Math.Max(0, vehicle.DistanceRemainingM);
+        vehicle.DistanceTravelledM = Math.Max(0, vehicle.DistanceTravelledM);
+        if (vehicle.FuelTankCapacity > 0 && vehicle.FuelLevelPercent >= 0)
+        {
+            vehicle.CurrentFuelLevel = Math.Max(0, vehicle.FuelTankCapacity * (vehicle.FuelLevelPercent / 100.0));
+        }
+    }
+
+    private bool ShouldEmitAlert(int vehicleId, string type, DateTimeOffset nowUtc)
+    {
+        var perVehicle = _alertTracker.GetOrAdd(vehicleId, _ => new ConcurrentDictionary<string, DateTimeOffset>());
+        if (perVehicle.TryGetValue(type, out var last) && nowUtc - last < AlertCooldown)
+        {
+            return false;
+        }
+        perVehicle[type] = nowUtc;
+        return true;
+    }
+
+    private async Task EmitAlertsAsync(Vehicle vehicle, DateTimeOffset telemetryTimestamp, CancellationToken cancellationToken)
+    {
+        var alerts = new List<VehicleAlertDto>();
+        var fuelFamily = string.Equals(vehicle.FuelType, "electric", StringComparison.OrdinalIgnoreCase)
+            ? "electric"
+            : "diesel";
+        var lowFuelThreshold = fuelFamily == "electric" ? 20.0 : 15.0;
+
+        if (vehicle.FuelLevelPercent <= lowFuelThreshold && ShouldEmitAlert(vehicle.Id, "fuel-low", telemetryTimestamp))
+        {
+            alerts.Add(new VehicleAlertDto
+            {
+                VehicleId = vehicle.Id,
+                LicensePlate = vehicle.LicensePlate,
+                Type = "fuel-low",
+                Description = $"{Math.Round(vehicle.FuelLevelPercent, 0)}% {(fuelFamily == "electric" ? "battery" : "fuel")} remaining",
+                RaisedAtUtc = telemetryTimestamp
+            });
+        }
+
+        var baseSpeedThreshold = vehicle.BaseSpeedKmh > 0 ? vehicle.BaseSpeedKmh + 10.0 : 0.0;
+        var speedingThreshold = Math.Max(90.0, baseSpeedThreshold);
+        if (vehicle.SpeedKmh > speedingThreshold && ShouldEmitAlert(vehicle.Id, "speeding", telemetryTimestamp))
+        {
+            alerts.Add(new VehicleAlertDto
+            {
+                VehicleId = vehicle.Id,
+                LicensePlate = vehicle.LicensePlate,
+                Type = "speeding",
+                Description = $"High speed: {Math.Round(vehicle.SpeedKmh, 0)} km/h",
+                RaisedAtUtc = telemetryTimestamp
+            });
+        }
+
+        var isOffline = string.Equals(vehicle.Status, "offline", StringComparison.OrdinalIgnoreCase)
+                        || telemetryTimestamp < DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5);
+        if (isOffline && ShouldEmitAlert(vehicle.Id, "offline", telemetryTimestamp))
+        {
+            alerts.Add(new VehicleAlertDto
+            {
+                VehicleId = vehicle.Id,
+                LicensePlate = vehicle.LicensePlate,
+                Type = "offline",
+                Description = "No telemetry in the last 5 minutes",
+                RaisedAtUtc = telemetryTimestamp
+            });
+        }
+
+        foreach (var alert in alerts)
+        {
+            try
+            {
+                await _vehicleHubContext.Clients.All.SendAsync(VehicleHub.VehicleAlertMethod, alert, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast alert {AlertType} for vehicle {VehicleId}", alert.Type, alert.VehicleId);
+            }
+        }
     }
 
     private async Task BroadcastVehicleUpdateAsync(ApplicationDbContext dbContext, Vehicle vehicle, CancellationToken cancellationToken)
@@ -503,6 +738,11 @@ public class VehicleTelemetryIngestionService : BackgroundService
         try
         {
             var dto = vehicle.ToVehicleDto();
+            var alertTimestamp = vehicle.LastTelemetryAtUtc.HasValue
+                ? new DateTimeOffset(DateTime.SpecifyKind(vehicle.LastTelemetryAtUtc.Value, DateTimeKind.Utc))
+                : DateTimeOffset.UtcNow;
+            await EmitAlertsAsync(vehicle, alertTimestamp, cancellationToken);
+            NormalizeVehicleTelemetry(vehicle);
             await _vehicleHubContext.Clients.All.SendAsync(VehicleHub.VehicleUpdatedMethod, dto, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -609,6 +849,33 @@ public class VehicleTelemetryIngestionService : BackgroundService
     private static string? NullIfEmpty(string value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static bool IsFinite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
+
+    private bool HasInvalidCoreTelemetry(TelemetryEnvelope envelope, out string reason)
+    {
+        var payload = envelope.Payload;
+        if (payload.Position is null || !IsFinite(payload.Position.Lat) || !IsFinite(payload.Position.Lon))
+        {
+            reason = "position";
+            return true;
+        }
+
+        if (!IsFinite(payload.SpeedKmh))
+        {
+            reason = "speed";
+            return true;
+        }
+
+        if (!IsFinite(payload.FuelLevel) || !IsFinite(payload.FuelLevelPercent))
+        {
+            reason = "fuel";
+            return true;
+        }
+
+        reason = string.Empty;
+        return false;
     }
 
     private sealed record TelemetryEnvelope(VehicleTelemetryPayload Payload, DateTime ReceivedAtUtc);
