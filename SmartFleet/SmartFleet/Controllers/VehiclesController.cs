@@ -1,11 +1,16 @@
 using System;
 using System.Linq;
 using System.Security.Claims;
+using System.Text;
+using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using SmartFleet.Dtos;
 using SmartFleet.Models;
+using SmartFleet.Models.Auth;
 using SmartFleet.Services;
+using SmartFleet.Hubs;
 
 namespace SmartFleet.Controllers;
 
@@ -13,10 +18,12 @@ namespace SmartFleet.Controllers;
 [Route("api/[controller]")]
 public class VehiclesController(
     IVehicleService vehicleService,
-    IVehicleCommandPublisher vehicleCommandPublisher) : ControllerBase
+    IVehicleCommandPublisher vehicleCommandPublisher,
+    IHubContext<VehicleHub> vehicleHubContext) : ControllerBase
 {
     private readonly IVehicleService _vehicleService = vehicleService;
     private readonly IVehicleCommandPublisher _vehicleCommandPublisher = vehicleCommandPublisher;
+    private readonly IHubContext<VehicleHub> _vehicleHubContext = vehicleHubContext;
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<VehicleDto>>> GetVehicles(CancellationToken cancellationToken)
@@ -84,6 +91,38 @@ public class VehiclesController(
     {
         var deleted = await _vehicleService.DeleteAsync(id, cancellationToken);
         return deleted ? NoContent() : NotFound();
+    }
+
+    [HttpGet("export")]
+    [Authorize(Policy = "MapsAccess")]
+    public async Task<IActionResult> ExportVehicles([FromQuery] string? status, [FromQuery] string? query, CancellationToken cancellationToken)
+    {
+        if (User.IsInRole(UserRole.Driver.ToString()))
+        {
+            return Forbid();
+        }
+
+        var vehicles = await _vehicleService.GetAllAsync(cancellationToken);
+
+        var filtered = vehicles.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            var normalizedStatus = status.Trim().ToLowerInvariant();
+            filtered = filtered.Where(v => (v.Status ?? string.Empty).Trim().ToLowerInvariant() == normalizedStatus);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var normalizedQuery = query.Trim().ToLowerInvariant();
+            filtered = filtered.Where(v =>
+                v.LicensePlate.ToLowerInvariant().Contains(normalizedQuery) ||
+                (!string.IsNullOrWhiteSpace(v.RouteSummary) && v.RouteSummary!.ToLowerInvariant().Contains(normalizedQuery)) ||
+                (!string.IsNullOrWhiteSpace(v.Brand) && v.Brand!.ToLowerInvariant().Contains(normalizedQuery)));
+        }
+
+        var csv = BuildVehicleCsv(filtered);
+        var fileName = $"fleet-export-{DateTime.UtcNow:yyyyMMddHHmmss}.csv";
+        return File(Encoding.UTF8.GetBytes(csv), "text/csv", fileName);
     }
 
     [HttpPost("{vehicleId:int}/driver/{userId:int}")]
@@ -194,6 +233,30 @@ public class VehiclesController(
             requestId,
             cancellationToken);
 
+        try
+        {
+            await _vehicleHubContext.Clients.All.SendAsync(
+                VehicleHub.RouteUpdatedMethod,
+                new
+                {
+                    vehicleId = vehicle.Id,
+                    routeId = requestId,
+                    routeSummary = BuildRoutePreviewSummary(stops, payload.RouteLabel, vehicle.RouteSummary),
+                    licensePlate = vehicle.LicensePlate,
+                    stops = stops.Select(stop => new
+                    {
+                        stop.Name,
+                        Latitude = stop.Latitude,
+                        Longitude = stop.Longitude
+                    }).ToList()
+                },
+                cancellationToken);
+        }
+        catch
+        {
+            // best-effort notification; do not fail the request on hub issues
+        }
+
         return Accepted(new
         {
             requestId,
@@ -201,5 +264,62 @@ public class VehiclesController(
             externalId,
             stops = stops.Count
         });
+    }
+
+    private static string BuildRoutePreviewSummary(
+        IReadOnlyList<VehicleRouteCommandStop> stops,
+        string? routeLabel,
+        string? fallbackSummary)
+    {
+        if (!string.IsNullOrWhiteSpace(routeLabel))
+        {
+            return routeLabel.Trim();
+        }
+
+        var inferred = string.Join(" -> ",
+            stops
+                .Select(stop => stop.Name?.Trim())
+                .Where(name => !string.IsNullOrWhiteSpace(name)));
+
+        if (!string.IsNullOrWhiteSpace(inferred))
+        {
+            return inferred;
+        }
+
+        return fallbackSummary ?? string.Empty;
+    }
+
+    private static string BuildVehicleCsv(IEnumerable<Vehicle> vehicles)
+    {
+        var culture = CultureInfo.InvariantCulture;
+        var header = "licensePlate,status,routeSummary,fuelPercent,progressPercent,driver,etaMinutes,co2Kg";
+        var lines = vehicles.Select(v =>
+        {
+            var driver = v.Driver is null ? string.Empty : $"{v.Driver.FirstName} {v.Driver.LastName}".Trim();
+            var etaMinutes = v.EtaSeconds > 0 ? Math.Round(v.EtaSeconds / 60.0, 0) : 0;
+            var co2 = v.CO2Emission;
+
+            string Escape(string value) => value.Contains(',') || value.Contains('"')
+                ? $"\"{value.Replace("\"", "\"\"")}\""
+                : value;
+
+            return string.Join(",",
+                Escape(v.LicensePlate ?? string.Empty),
+                Escape((v.Status ?? string.Empty).Trim()),
+                Escape(v.RouteSummary ?? string.Empty),
+                Math.Round(v.FuelLevelPercent, 1).ToString(culture),
+                Math.Round(v.Progress * 100, 1).ToString(culture),
+                Escape(driver),
+                etaMinutes.ToString(culture),
+                Math.Round(co2, 2).ToString(culture));
+        });
+
+        var builder = new StringBuilder();
+        builder.AppendLine(header);
+        foreach (var line in lines)
+        {
+            builder.AppendLine(line);
+        }
+        return builder.ToString();
     }
 }

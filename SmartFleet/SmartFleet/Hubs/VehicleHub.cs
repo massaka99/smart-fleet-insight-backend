@@ -7,4 +7,6 @@ namespace SmartFleet.Hubs;
 public class VehicleHub : Hub
 {
     public const string VehicleUpdatedMethod = "VehicleUpdated";
+    public const string VehicleAlertMethod = "VehicleAlert";
+    public const string RouteUpdatedMethod = "RouteUpdated";
 }
