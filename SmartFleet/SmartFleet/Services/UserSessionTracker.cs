@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Concurrent;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace SmartFleet.Services;
 
@@ -62,10 +64,64 @@ internal sealed class UserSessionTracker : IUserSessionTracker
             return false;
         }
 
-    public bool IsSessionActive(int userId, Guid sessionId) => true;
+        if (record.IsExpired)
+        {
+            RemoveSession(sessionId);
+            return false;
+        }
+
+        return true;
+    }
 
     public void EndSession(Guid sessionId)
     {
-        // No-op – we intentionally allow concurrent sessions and do not track them.
+        if (_cache.TryGetValue<SessionRecord>(SessionKey(sessionId), out var record) && record is not null)
+        {
+            ExecuteWithLock(record.UserId, () =>
+            {
+                RemoveSession(sessionId);
+                return true;
+            });
+            _locks.TryRemove(record.UserId, out _);
+        }
+    }
+
+    private bool ExecuteWithLock(int userId, Func<bool> action)
+    {
+        var lockObject = _locks.GetOrAdd(userId, _ => new object());
+        lock (lockObject)
+        {
+            return action();
+        }
+    }
+
+    private void StoreSession(SessionRecord record)
+    {
+        var expiry = record.ExpiresAt > DateTime.UtcNow ? record.ExpiresAt : DateTime.UtcNow;
+        var absoluteExpiration = DateTimeOffset.UtcNow + (expiry - DateTime.UtcNow) + CleanupGracePeriod;
+        var options = new MemoryCacheEntryOptions
+        {
+            AbsoluteExpiration = absoluteExpiration
+        };
+
+        _cache.Set(UserKey(record.UserId), record, options);
+        _cache.Set(SessionKey(record.SessionId), record, options);
+    }
+
+    private void RemoveSession(Guid sessionId)
+    {
+        if (_cache.TryGetValue<SessionRecord>(SessionKey(sessionId), out var record) && record is not null)
+        {
+            _cache.Remove(SessionKey(sessionId));
+            _cache.Remove(UserKey(record.UserId));
+        }
+    }
+
+    private static string UserKey(int userId) => $"session:user:{userId}";
+    private static string SessionKey(Guid sessionId) => $"session:id:{sessionId}";
+
+    private record SessionRecord(Guid SessionId, int UserId, DateTime ExpiresAt)
+    {
+        public bool IsExpired => ExpiresAt <= DateTime.UtcNow;
     }
 }
