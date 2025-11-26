@@ -92,4 +92,16 @@ public class UserSessionTrackerTests
         tracker.IsSessionActive(userId, sessionId).Should().BeFalse();
         tracker.TryBeginSession(userId, Guid.NewGuid(), DateTime.UtcNow.AddMinutes(1)).Should().BeTrue();
     }
+
+    [Fact]
+    public void IsSessionActive_ReturnsFalse_WhenSessionIdDoesNotMatch()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var tracker = new UserSessionTracker(cache);
+        var userId = 16;
+        var sessionId = Guid.NewGuid();
+        tracker.TryBeginSession(userId, sessionId, DateTime.UtcNow.AddMinutes(1)).Should().BeTrue();
+
+        tracker.IsSessionActive(userId, Guid.NewGuid()).Should().BeFalse();
+    }
 }
