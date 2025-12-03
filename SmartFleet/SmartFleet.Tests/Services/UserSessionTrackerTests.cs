@@ -8,7 +8,7 @@ namespace SmartFleet.Tests.Services;
 public class UserSessionTrackerTests
 {
     [Fact]
-    public void TryBeginSession_BlocksConcurrentSessionsForSameUser()
+    public void TryBeginSession_ReplacesExistingSessionForSameUser()
     {
         using var cache = new MemoryCache(new MemoryCacheOptions());
         var tracker = new UserSessionTracker(cache);
@@ -18,8 +18,9 @@ public class UserSessionTrackerTests
         tracker.TryBeginSession(userId, firstSession, DateTime.UtcNow.AddMinutes(5)).Should().BeTrue();
 
         var competingSession = Guid.NewGuid();
-        tracker.TryBeginSession(userId, competingSession, DateTime.UtcNow.AddMinutes(5)).Should().BeFalse();
-        tracker.IsSessionActive(userId, firstSession).Should().BeTrue();
+        tracker.TryBeginSession(userId, competingSession, DateTime.UtcNow.AddMinutes(5)).Should().BeTrue();
+        tracker.IsSessionActive(userId, firstSession).Should().BeFalse();
+        tracker.IsSessionActive(userId, competingSession).Should().BeTrue();
     }
 
     [Fact]

@@ -22,11 +22,8 @@ internal sealed class UserSessionTracker : IUserSessionTracker
             var key = UserKey(userId);
             if (_cache.TryGetValue<SessionRecord>(key, out var existing) && existing is not null)
             {
-                if (!existing.IsExpired && existing.SessionId != sessionId)
-                {
-                    return false;
-                }
-
+                // Always replace any existing session (expired or active) so a fresh login
+                // becomes the single active session for the user.
                 RemoveSession(existing.SessionId);
             }
 
