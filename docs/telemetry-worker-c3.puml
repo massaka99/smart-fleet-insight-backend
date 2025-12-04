@@ -1,0 +1,22 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_TOP_DOWN()
+
+System_Ext(mqtt, "MQTT Broker (Mosquitto)", "fleet/telemetry", "Publishes fleet telemetry")
+System_Ext(db, "PostgreSQL (Neon)", "SQL", "Telemetry persistence and vehicle state")
+
+Container_Boundary(worker, "Telemetry worker") {
+  Component(mqttClient, "Managed MQTT Client", "MQTTnet", "Subscribes fleet/telemetry topic")
+  Component(ingestor, "VehicleTelemetryIngestionService", "BackgroundService", "Parse/validate, batch & persist; normalize telemetry; assign driver; raise alerts; broadcast via SignalR")
+  Component(dbCtx, "ApplicationDbContext", "EF Core", "DB access to PostgreSQL")
+  Component(vehicleHub, "VehicleHub", "SignalR Hub", "Broadcast live vehicle updates/alerts")
+}
+
+Rel(mqtt, mqttClient, "Publishes telemetry", "MQTT fleet/telemetry")
+Rel(mqttClient, ingestor, "Delivers messages", "MQTT payloads")
+Rel(ingestor, dbCtx, "Persist/upsert vehicles & drivers", "EF Core")
+Rel(ingestor, vehicleHub, "Push live updates/alerts", "SignalR")
+Rel(dbCtx, db, "Read/write vehicle/telemetry data", "SQL")
+
+@enduml

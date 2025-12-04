@@ -1,0 +1,37 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_TOP_DOWN()
+
+System_Ext(backend, "Backend API & SignalR", "ASP.NET Core", "REST + SignalR hubs (/hubs/chat, /hubs/vehicles)")
+System_Ext(mqtt, "MQTT Broker (Mosquitto)", "fleet/commands / fleet/telemetry")
+System_Ext(sim, "Vehicle Simulator", "Test telemetry source", "Consumes route commands; emits telemetry")
+System_Ext(gmaps, "Google Maps Platform", "Maps/Places JS SDK", "Loads tiles/places via HTTPS")
+
+Container_Boundary(web, "Web App (React + Vite)") {
+  Component(http, "http.ts", "TypeScript", "Fetch wrapper: base URL, bearer token, CSRF, error handling")
+  Component(authUi, "AuthProvider + SignInCard/NewPassword", "TypeScript / React", "Password + OTP auth, session storage, reset flow")
+  Component(chatUi, "ChatProvider + ChatModal", "TypeScript / React + SignalR", "Chat hub connection, threads/messages, toasts")
+  Component(mapsUi, "MapsPage + VehicleHub client", "TypeScript / React + SignalR", "Fleet map, vehicle list, CSV export, live vehicle updates")
+  Component(navUi, "NavigationProvider / SessionTimeoutProvider", "TypeScript / React", "Routing + idle timeout handling")
+}
+
+Rel(authUi, http, "REST: login / otp / set / reset / logout / profile")
+Rel(chatUi, http, "REST: participants / threads / send / status")
+Rel(mapsUi, http, "REST: vehicles / export CSV / new routes (forwarded to simulator via MQTT)")
+Rel(navUi, http, "Uses for token/401 handling")
+
+Rel(chatUi, backend, "SignalR: /hubs/chat")
+Rel(mapsUi, backend, "SignalR: /hubs/vehicles (telemetry/alerts)")
+Rel(http, backend, "HTTPS REST")
+
+Rel(backend, mqtt, "Publishes route commands", "MQTT fleet/commands")
+Rel(mqtt, sim, "Delivers commands", "MQTT fleet/commands")
+Rel(sim, mqtt, "Publishes telemetry", "MQTT fleet/telemetry")
+Rel(mqtt, backend, "Telemetry -> VehicleTelemetryIngestionService", "MQTT fleet/telemetry")
+
+Rel(mapsUi, gmaps, "Loads JS SDK, tiles, places", "HTTPS")
+
+Rel(navUi, authUi, "Coordinates auth state/session timeout", "in-app")
+
+@enduml

@@ -4,7 +4,6 @@ using System.Text.Json;
 using System.Threading.Channels;
 using System.Collections.Concurrent;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -14,12 +13,12 @@ using MQTTnet.Client;
 using MQTTnet.Extensions.ManagedClient;
 using MQTTnet.Formatter;
 using MQTTnet.Protocol;
-using SmartFleet.Data;
 using SmartFleet.Dtos;
 using SmartFleet.Hubs;
 using SmartFleet.Models;
 using SmartFleet.Models.Telemetry;
 using SmartFleet.Options;
+using SmartFleet.Data.Repositories;
 
 namespace SmartFleet.Services.Telemetry;
 
@@ -248,7 +247,8 @@ public class VehicleTelemetryIngestionService : BackgroundService
         }
 
         using var scope = _scopeFactory.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var vehicleRepository = scope.ServiceProvider.GetRequiredService<IVehicleRepository>();
+        var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
 
         var byExternalId = new Dictionary<string, Vehicle>(StringComparer.OrdinalIgnoreCase);
         var byLicensePlate = new Dictionary<string, Vehicle>(StringComparer.OrdinalIgnoreCase);
@@ -265,7 +265,8 @@ public class VehicleTelemetryIngestionService : BackgroundService
                 }
 
                 var vehicle = await UpsertVehicleAsync(
-                    dbContext,
+                    vehicleRepository,
+                    userRepository,
                     envelope,
                     byExternalId,
                     byLicensePlate,
@@ -283,16 +284,17 @@ public class VehicleTelemetryIngestionService : BackgroundService
             }
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await vehicleRepository.SaveChangesAsync(cancellationToken);
 
         foreach (var vehicle in vehiclesToBroadcast.DistinctBy(v => v.Id))
         {
-            await BroadcastVehicleUpdateAsync(dbContext, vehicle, cancellationToken);
+            await BroadcastVehicleUpdateAsync(vehicleRepository, vehicle, cancellationToken);
         }
     }
 
     private async Task<Vehicle> UpsertVehicleAsync(
-        ApplicationDbContext dbContext,
+        IVehicleRepository vehicleRepository,
+        IUserRepository userRepository,
         TelemetryEnvelope envelope,
         IDictionary<string, Vehicle> byExternalId,
         IDictionary<string, Vehicle> byLicensePlate,
@@ -320,8 +322,7 @@ public class VehicleTelemetryIngestionService : BackgroundService
         {
             if (!byExternalId.TryGetValue(normalizedExternalId, out vehicle))
             {
-                vehicle = await dbContext.Vehicles
-                    .FirstOrDefaultAsync(v => v.ExternalId == normalizedExternalId, cancellationToken);
+                vehicle = await vehicleRepository.GetByExternalIdAsync(normalizedExternalId, asTracking: true, cancellationToken);
 
                 if (vehicle is not null)
                 {
@@ -342,8 +343,7 @@ public class VehicleTelemetryIngestionService : BackgroundService
         {
             if (!byLicensePlate.TryGetValue(normalizedPlate, out vehicle))
             {
-                vehicle = await dbContext.Vehicles
-                    .FirstOrDefaultAsync(v => v.LicensePlate == normalizedPlate, cancellationToken);
+                vehicle = await vehicleRepository.GetByLicensePlateAsync(normalizedPlate, asTracking: true, cancellationToken);
 
                 if (vehicle is not null)
                 {
@@ -395,7 +395,7 @@ public class VehicleTelemetryIngestionService : BackgroundService
                 UpdatedAt = DateTime.UtcNow
             };
 
-            dbContext.Vehicles.Add(vehicle);
+            await vehicleRepository.AddAsync(vehicle, cancellationToken);
         }
         else
         {
@@ -494,23 +494,24 @@ public class VehicleTelemetryIngestionService : BackgroundService
 
         if (payload.Driver is not null)
         {
-            await AssignDriverAsync(dbContext, vehicle, payload.Driver, cancellationToken);
+            await AssignDriverAsync(vehicleRepository, userRepository, vehicle, payload.Driver, cancellationToken);
         }
         else
         {
-            await EnsureDriverAssignmentAsync(dbContext, vehicle, cancellationToken);
+            await EnsureDriverAssignmentAsync(vehicleRepository, userRepository, vehicle, cancellationToken);
         }
 
         return vehicle;
     }
 
     private async Task AssignDriverAsync(
-        ApplicationDbContext dbContext,
+        IVehicleRepository vehicleRepository,
+        IUserRepository userRepository,
         Vehicle vehicle,
         VehicleTelemetryDriverPayload driverPayload,
         CancellationToken cancellationToken)
     {
-        var user = await ResolveDriverAsync(dbContext, driverPayload, cancellationToken);
+        var user = await ResolveDriverAsync(userRepository, driverPayload, cancellationToken);
         if (user is null)
         {
             return;
@@ -522,11 +523,7 @@ public class VehicleTelemetryIngestionService : BackgroundService
             return;
         }
 
-        var vehicleDriverEntry = dbContext.Entry(vehicle).Reference(v => v.Driver);
-        if (!vehicleDriverEntry.IsLoaded)
-        {
-            await vehicleDriverEntry.LoadAsync(cancellationToken);
-        }
+        await vehicleRepository.LoadDriverAsync(vehicle, cancellationToken);
 
         if (vehicle.Driver?.Id == user.Id)
         {
@@ -541,8 +538,7 @@ public class VehicleTelemetryIngestionService : BackgroundService
 
         if (user.VehicleId.HasValue && user.VehicleId != vehicle.Id)
         {
-            var previousVehicle = await dbContext.Vehicles
-                .FirstOrDefaultAsync(v => v.Id == user.VehicleId.Value, cancellationToken);
+            var previousVehicle = await vehicleRepository.GetByIdAsync(user.VehicleId.Value, includeDriver: false, asTracking: true, cancellationToken);
             if (previousVehicle is not null)
             {
                 previousVehicle.Driver = null;
@@ -557,25 +553,19 @@ public class VehicleTelemetryIngestionService : BackgroundService
     }
 
     private async Task EnsureDriverAssignmentAsync(
-        ApplicationDbContext dbContext,
+        IVehicleRepository vehicleRepository,
+        IUserRepository userRepository,
         Vehicle vehicle,
         CancellationToken cancellationToken)
     {
-        var driverEntry = dbContext.Entry(vehicle).Reference(v => v.Driver);
-        if (!driverEntry.IsLoaded)
-        {
-            await driverEntry.LoadAsync(cancellationToken);
-        }
+        await vehicleRepository.LoadDriverAsync(vehicle, cancellationToken);
 
         if (vehicle.Driver is not null)
         {
             return;
         }
 
-        var availableDriver = await dbContext.Users
-            .Where(u => u.Role == UserRole.Driver && u.VehicleId == null)
-            .OrderBy(u => u.Id)
-            .FirstOrDefaultAsync(cancellationToken);
+        var availableDriver = await userRepository.GetFirstAvailableDriverAsync(cancellationToken);
 
         if (availableDriver is null)
         {
@@ -589,13 +579,13 @@ public class VehicleTelemetryIngestionService : BackgroundService
     }
 
     private async Task<User?> ResolveDriverAsync(
-        ApplicationDbContext dbContext,
+        IUserRepository userRepository,
         VehicleTelemetryDriverPayload payload,
         CancellationToken cancellationToken)
     {
         if (payload.UserId is int userId && userId > 0)
         {
-            var user = await dbContext.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+            var user = await userRepository.GetByIdAsync(userId, includeVehicle: false, asTracking: true, cancellationToken);
             if (user is not null)
             {
                 return user;
@@ -605,7 +595,7 @@ public class VehicleTelemetryIngestionService : BackgroundService
         var normalizedEmail = payload.Email?.Trim().ToLowerInvariant();
         if (!string.IsNullOrWhiteSpace(normalizedEmail))
         {
-            var user = await dbContext.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
+            var user = await userRepository.GetByEmailAsync(normalizedEmail, includeVehicle: false, asTracking: true, cancellationToken);
             if (user is not null)
             {
                 return user;
@@ -711,7 +701,7 @@ public class VehicleTelemetryIngestionService : BackgroundService
         }
     }
 
-    private async Task BroadcastVehicleUpdateAsync(ApplicationDbContext dbContext, Vehicle vehicle, CancellationToken cancellationToken)
+    private async Task BroadcastVehicleUpdateAsync(IVehicleRepository vehicleRepository, Vehicle vehicle, CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested)
         {
@@ -720,11 +710,7 @@ public class VehicleTelemetryIngestionService : BackgroundService
 
         try
         {
-            var driverEntry = dbContext.Entry(vehicle).Reference(v => v.Driver);
-            if (!driverEntry.IsLoaded)
-            {
-                await driverEntry.LoadAsync(cancellationToken);
-            }
+            await vehicleRepository.LoadDriverAsync(vehicle, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

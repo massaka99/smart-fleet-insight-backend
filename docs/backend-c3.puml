@@ -1,0 +1,80 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Fleet Users", "Drivers, coordinators and admins using the dashboard")
+System_Ext(web, "Fleet Insight Web App", "React/TypeScript SPA", "Calls REST APIs and SignalR hubs")
+System_Ext(postgres, "PostgreSQL", "SmartFleet relational database")
+System_Ext(mqtt, "MQTT Broker (Mosquitto)", "Telemetry topic fleet/telemetry; command topic fleet/commands")
+System_Ext(sendgrid, "SendGrid", "Email delivery for OTP and password reset")
+System_Ext(vehicles, "Vehicles / Simulator", "Publishes telemetry; consumes route commands via MQTT")
+
+Container_Boundary(api, "SmartFleet Backend (ASP.NET Core)") {
+  Component(authApi, "Auth API", "AuthController", "Register/login, OTP login, password reset")
+  Component(usersApi, "Users API", "UsersController", "User lookup, roles, profile updates")
+  Component(vehiclesApi, "Vehicles API", "VehiclesController", "Vehicle CRUD, driver assignment, route updates")
+  Component(chatApi, "Chat API", "ChatController", "Threads and chat history")
+
+  Component(chatHub, "ChatHub", "SignalR hub", "Realtime chat message delivery and receipts")
+  Component(vehicleHub, "VehicleHub", "SignalR hub", "Vehicle telemetry, alerts and route update notifications")
+
+  Component(authSvc, "AuthService", "Application service", "Auth flows, session tracking, JWT issuance")
+  Component(userSvc, "UserService", "Application service", "User profiles, roles and password reset flags")
+  Component(vehicleSvc, "VehicleService", "Application service", "Vehicle lifecycle, driver assignment, route previews")
+  Component(chatSvc, "ChatService", "Application service", "Chat threads and message send/delivery")
+  Component(otpSvc, "OtpService", "Application service", "OTP generation/validation and caching")
+  Component(tokenSvc, "JwtTokenService", "Infrastructure", "Creates signed JWT access tokens")
+  Component(sessionTracker, "UserSessionTracker", "Infrastructure", "Tracks active JWT sessions (jti) in-memory")
+  Component(emailSender, "SendGridEmailSender", "Infrastructure", "Sends templated emails via SendGrid")
+  Component(commandPub, "VehicleCommandPublisher", "Infrastructure", "Publishes route commands to MQTT topic fleet/commands")
+  Component(ingestor, "VehicleTelemetryIngestionService", "Background service", "Consumes MQTT telemetry, updates vehicles, emits alerts")
+  Component(vehicleRepo, "VehicleRepository", "EF Core repository", "Vehicle persistence and driver loading")
+  Component(userRepo, "UserRepository", "EF Core repository", "User persistence and lookups")
+  Component(chatRepo, "ChatRepository", "EF Core repository", "Chat thread/message persistence")
+  Component(dbCtx, "ApplicationDbContext", "EF Core", "Unit of work mapping to PostgreSQL")
+}
+
+Rel(admin, web, "Uses", "Browser")
+Rel(web, authApi, "Calls auth endpoints", "HTTPS/JSON + JWT")
+Rel(web, usersApi, "Calls user endpoints", "HTTPS/JSON + JWT")
+Rel(web, vehiclesApi, "Calls vehicle endpoints", "HTTPS/JSON + JWT")
+Rel(web, chatApi, "Calls chat endpoints", "HTTPS/JSON + JWT")
+Rel(web, chatHub, "Subscribes/publishes chat events", "SignalR/WebSockets")
+Rel(web, vehicleHub, "Receives telemetry/alerts and route updates", "SignalR/WebSockets")
+
+Rel(authApi, authSvc, "Uses")
+Rel(usersApi, userSvc, "Uses")
+Rel(vehiclesApi, vehicleSvc, "Uses")
+Rel(vehiclesApi, commandPub, "Publishes route commands")
+Rel(vehiclesApi, vehicleHub, "Notifies route previews/updates", "SignalR")
+Rel(chatApi, chatSvc, "Uses")
+
+Rel(authSvc, userRepo, "User lookup/update")
+Rel(authSvc, otpSvc, "Requests OTP send/verification")
+Rel(authSvc, tokenSvc, "Issues JWT")
+Rel(authSvc, sessionTracker, "Tracks active sessions")
+Rel(otpSvc, userRepo, "Stores OTP hash/expiry")
+Rel(otpSvc, emailSender, "Sends OTP email")
+Rel(userSvc, userRepo, "User CRUD and role updates")
+Rel(userSvc, chatRepo, "Cleans up chat links when deleting users", "EF Core")
+Rel(vehicleSvc, vehicleRepo, "Vehicle CRUD")
+Rel(vehicleSvc, userRepo, "Driver assignment/validation")
+Rel(chatSvc, chatRepo, "Persist chat threads/messages")
+Rel(chatSvc, userRepo, "Resolve participants")
+Rel(chatSvc, chatHub, "Broadcasts chat events", "SignalR")
+Rel(commandPub, mqtt, "Publishes route commands", "MQTT fleet/commands")
+Rel(ingestor, mqtt, "Subscribes to telemetry", "MQTT fleet/telemetry")
+Rel(ingestor, vehicleRepo, "Upserts vehicles/telemetry + alerts")
+Rel(ingestor, vehicleHub, "Broadcasts telemetry and alerts", "SignalR")
+
+Rel(vehicleRepo, dbCtx, "Uses EF Core DbContext")
+Rel(userRepo, dbCtx, "Uses EF Core DbContext")
+Rel(chatRepo, dbCtx, "Uses EF Core DbContext")
+Rel(dbCtx, postgres, "Reads/writes", "Npgsql")
+
+Rel(mqtt, vehicles, "Delivers commands", "MQTT fleet/commands")
+Rel(vehicles, mqtt, "Publishes telemetry", "MQTT fleet/telemetry")
+Rel(emailSender, sendgrid, "Sends email", "SendGrid API")
+
+@enduml

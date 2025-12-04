@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using SmartFleet.Data;
+using SmartFleet.Data.Repositories;
 using SmartFleet.Dtos;
 using SmartFleet.Models;
 using SmartFleet.Services;
@@ -380,7 +381,9 @@ public class UserServiceIntegrationTests
 
     private static UserService CreateService(ApplicationDbContext context, IPasswordHasher<User>? passwordHasher = null)
     {
-        return new UserService(context, passwordHasher ?? new PasswordHasher<User>());
+        var userRepository = new UserRepository(context);
+        var chatRepository = new ChatRepository(context);
+        return new UserService(userRepository, chatRepository, passwordHasher ?? new PasswordHasher<User>());
     }
 
     private static User CreateUser(int id, string email)
