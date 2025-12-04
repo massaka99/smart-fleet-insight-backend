@@ -1,0 +1,39 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Admin", "Manages users")
+Person(coord, "Coordinator", "Manages vehicles")
+Person(driver, "Driver", "Manages updates")
+
+System_Boundary(system, "Fleet Insight") {
+  Container(web, "Web App", "React + Vite (TypeScript)", "SPA for tracking, chat, routing, telemetry")
+  Container(api, "Backend API & SignalR", "ASP.NET Core", "Auth, fleet, chat, admin endpoints; SignalR hubs /hubs/chat, /hubs/vehicles")
+  ContainerDb(db, "PostgreSQL (Neon)", "PostgreSQL", "System of record for users, vehicles, chat, telemetry snapshots")
+  Container(osrm, "OSRM Routing", "OSRM", "Routing service for simulator trips")
+  Container(mqtt, "MQTT Broker", "Eclipse Mosquitto", "Topics: fleet/commands, fleet/telemetry")
+  Container(sim, "Vehicle Simulator (test)", "Simulator", "Publishes telemetry; subscribes to route commands")
+}
+
+System_Ext(gmaps, "Google Maps Platform", "Maps/Places via HTTPS")
+System_Ext(sendgrid, "SendGrid Email Service", "OTP/password reset emails via HTTPS")
+
+Rel(admin, web, "Uses", "HTTPS")
+Rel(coord, web, "Uses", "HTTPS")
+Rel(driver, web, "Uses", "HTTPS")
+
+Rel(web, api, "REST: auth, fleet, chat, admin APIs", "HTTPS")
+Rel(api, web, "SignalR live updates (/hubs/chat, /hubs/vehicles)", "WS")
+Rel(api, db, "Read/write", "Npgsql")
+Rel(web, gmaps, "Loads maps/places", "HTTPS")
+Rel(api, sendgrid, "Sends OTP/password reset mails", "HTTPS")
+
+Rel(api, mqtt, "Publishes route commands (from web routes)", "MQTT fleet/commands")
+Rel(mqtt, sim, "Delivers commands", "MQTT fleet/commands")
+Rel(sim, mqtt, "Publishes telemetry", "MQTT fleet/telemetry")
+Rel(mqtt, api, "Telemetry to VehicleTelemetryIngestionService", "MQTT fleet/telemetry")
+
+Rel(sim, osrm, "Fetch routes for simulator trips", "HTTP API")
+
+@enduml

@@ -1,0 +1,59 @@
+```mermaid
+flowchart TD
+    %% Top-level actors/external systems
+    U[\"Fleet Users\n(drivers/coordinators/admins)\"] --> W[\"Fleet Insight Web App\n(React/TypeScript SPA)\"]
+    W -->|HTTPS/JSON + JWT| API[\"SmartFleet Backend\n(ASP.NET Core)\nREST + SignalR\"]
+    API -->|Npgsql| DB[(\"PostgreSQL\nSmartFleet DB\")]
+    API -->|MQTT fleet/commands| MQTT[\"MQTT Broker (Mosquitto)\"]
+    MQTT -->|MQTT fleet/telemetry| API
+    API -->|SendGrid API| SG[SendGrid]
+    VEH[\"Vehicles / Simulator\"] -->|Publishes telemetry\nMQTT fleet/telemetry| MQTT
+    MQTT -->|Delivers commands\nMQTT fleet/commands| VEH
+
+    %% Web real-time
+    W -->|SignalR/WebSockets| ChatHub[\"ChatHub\ntopic: chat events\"]
+    W -->|SignalR/WebSockets| VehicleHub[\"VehicleHub\ntopic: telemetry/alerts/routes\"]
+    API --> ChatHub
+    API --> VehicleHub
+
+    %% Controllers layer
+    subgraph Controllers
+        AuthAPI[\"AuthController\"] --> AuthSvc
+        UsersAPI[\"UsersController\"] --> UserSvc
+        VehiclesAPI[\"VehiclesController\"] --> VehicleSvc
+        VehiclesAPI --> CmdPub
+        VehiclesAPI --> VehicleHub
+        ChatAPI[\"ChatController\"] --> ChatSvc
+    end
+    API --> AuthAPI
+    API --> UsersAPI
+    API --> VehiclesAPI
+    API --> ChatAPI
+
+    %% Services + infra
+    subgraph Services
+        AuthSvc[\"AuthService\nJWT + session tracking\"] --> TokenSvc[\"JwtTokenService\"]
+        AuthSvc --> OtpSvc[\"OtpService\"] --> SG
+        AuthSvc --> SessionTracker[\"UserSessionTracker\n(in-memory)\"]
+        AuthSvc --> UserRepo
+        UserSvc[\"UserService\"] --> UserRepo
+        UserSvc --> ChatRepo
+        VehicleSvc[\"VehicleService\"] --> VehicleRepo
+        VehicleSvc --> UserRepo
+        CmdPub[\"VehicleCommandPublisher\"] --> MQTT
+        ChatSvc[\"ChatService\"] --> ChatRepo
+        ChatSvc --> UserRepo
+        ChatSvc --> ChatHub
+        Ingestor[\"VehicleTelemetryIngestionService\nBackgroundService\"] --> MQTT
+        Ingestor --> VehicleRepo
+        Ingestor --> VehicleHub
+    end
+
+    %% Persistence layer
+    subgraph Persistence
+        VehicleRepo[\"VehicleRepository\"] --> DbCtx[\"ApplicationDbContext\"]
+        UserRepo[\"UserRepository\"] --> DbCtx
+        ChatRepo[\"ChatRepository\"] --> DbCtx
+        DbCtx --> DB
+    end
+```

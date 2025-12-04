@@ -4,8 +4,6 @@ using System.Security.Claims;
 using System.Linq;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using SmartFleet.Data;
 using SmartFleet.Dtos;
 using SmartFleet.Models;
 using SmartFleet.Services;
@@ -16,12 +14,12 @@ namespace SmartFleet.Controllers;
 [Authorize]
 [Route("api/[controller]")]
 public class ChatController(
-    ApplicationDbContext context,
     IChatService chatService,
+    IUserService userService,
     ILogger<ChatController> logger) : ControllerBase
 {
-    private readonly ApplicationDbContext _context = context;
     private readonly IChatService _chatService = chatService;
+    private readonly IUserService _userService = userService;
     private readonly ILogger<ChatController> _logger = logger;
 
     [HttpGet("{recipientId:int}/thread")]
@@ -37,9 +35,7 @@ public class ChatController(
             return BadRequest(new { message = "Cannot start a chat with yourself." });
         }
 
-        var requester = await _context.Users
-            .AsNoTracking()
-            .FirstOrDefaultAsync(u => u.Id == requesterId, cancellationToken);
+        var requester = await _userService.GetByIdAsync(requesterId, cancellationToken);
 
         if (requester is null)
         {
@@ -67,15 +63,16 @@ public class ChatController(
             return Unauthorized();
         }
 
-        var participants = await _context.Users
-            .AsNoTracking()
+        var participants = await _userService.GetAllAsync(cancellationToken);
+
+        var participantDtos = participants
             .Where(u => u.Id != requesterId)
             .OrderBy(u => u.FirstName)
             .ThenBy(u => u.LastName)
             .Select(u => u.ToChatParticipantDto())
-            .ToListAsync(cancellationToken);
+            .ToList();
 
-        return Ok(participants);
+        return Ok(participantDtos);
     }
 
     [HttpPost("{recipientId:int}/messages")]

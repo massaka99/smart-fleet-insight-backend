@@ -1,0 +1,26 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_TOP_DOWN()
+
+System_Ext(backend, "Backend API", "ASP.NET Core", "Publishes route commands from dashboard; ingests telemetry")
+System_Ext(mqtt, "MQTT Broker (Mosquitto)", "fleet/commands (subscribe)\nfleet/telemetry (publish)")
+System_Ext(osrm, "OSRM Routing", "HTTP API", "Trip/route generation")
+
+Container_Boundary(sim, "Vehicle simulator (test)") {
+  Component(dispatcher, "RouteCommandDispatcher", "MQTT client", "Listens to route commands (fleet/commands); applies manual routes on fallback")
+  Component(generator, "Telemetry Generator", "Simulator app", "VehicleFleet + VehicleSimulator generates synthetic telemetry")
+  Component(osrmClient, "OSRM Client", "HTTP client", "Fetches routes for generated trips")
+  Component(publisher, "MQTT Publisher", "MQTT client", "Publishes telemetry to fleet/telemetry")
+}
+
+Rel(backend, mqtt, "Route commands (from frontend route updates)", "MQTT fleet/commands")
+Rel_L(mqtt, dispatcher, "Subscribes route commands", "MQTT fleet/commands")
+Rel(dispatcher, generator, "Apply manual/commanded route")
+Rel(osrmClient, osrm, "Fetch routes", "HTTP")
+Rel(generator, osrmClient, "Requests routes")
+Rel(generator, publisher, "Sends telemetry batches")
+Rel_R(publisher, mqtt, "Publishes telemetry", "MQTT fleet/telemetry")
+Rel(mqtt, backend, "Telemetry -> VehicleTelemetryIngestionService", "MQTT fleet/telemetry")
+
+@enduml

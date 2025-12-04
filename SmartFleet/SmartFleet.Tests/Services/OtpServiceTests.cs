@@ -8,6 +8,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SmartFleet.Data;
+using SmartFleet.Data.Repositories;
 using SmartFleet.Models;
 using SmartFleet.Options;
 using SmartFleet.Services;
@@ -175,11 +176,12 @@ public class OtpServiceTests
         SendGridOptions? sendGridOptions = null,
         IEmailSender? emailSender = null)
     {
+        var userRepository = new UserRepository(context);
         return new OtpService(
             cache,
             emailSender ?? Mock.Of<IEmailSender>(),
             NullLogger<OtpService>.Instance,
-            context,
+            userRepository,
             OptionsFactory.Create(otpOptions ?? new OtpOptions()),
             OptionsFactory.Create(sendGridOptions ?? new SendGridOptions { OtpTemplateId = "otp-template" }));
     }

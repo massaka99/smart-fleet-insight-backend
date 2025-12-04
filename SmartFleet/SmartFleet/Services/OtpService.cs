@@ -1,11 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using SmartFleet.Data;
+using SmartFleet.Data.Repositories;
 using SmartFleet.Models;
 using SmartFleet.Options;
 
@@ -16,7 +15,7 @@ public class OtpService : IOtpService
     private readonly IMemoryCache _cache;
     private readonly IEmailSender _emailSender;
     private readonly ILogger<OtpService> _logger;
-    private readonly ApplicationDbContext _context;
+    private readonly IUserRepository _userRepository;
     private readonly OtpOptions _options;
     private readonly SendGridOptions _sendGridOptions;
 
@@ -26,14 +25,14 @@ public class OtpService : IOtpService
         IMemoryCache cache,
         IEmailSender emailSender,
         ILogger<OtpService> logger,
-        ApplicationDbContext context,
+        IUserRepository userRepository,
         IOptions<OtpOptions> options,
         IOptions<SendGridOptions> sendGridOptions)
     {
         _cache = cache;
         _emailSender = emailSender;
         _logger = logger;
-        _context = context;
+        _userRepository = userRepository;
         _options = options.Value;
         _sendGridOptions = sendGridOptions.Value;
     }
@@ -47,17 +46,11 @@ public class OtpService : IOtpService
         var cacheEntry = new CacheEntry(hashedOtp, expiresAt);
         _cache.Set(GetCacheKey(user.Id), cacheEntry, expiresAt);
 
-        // Persist OTP to the database to survive process restarts.
-        if (_context.Entry(user).State == EntityState.Detached)
-        {
-            _context.Attach(user);
-        }
-
+        _userRepository.Attach(user);
         user.OtpHash = hashedOtp;
         user.OtpExpiresAt = expiresAt;
-        _context.Entry(user).Property(u => u.OtpHash).IsModified = true;
-        _context.Entry(user).Property(u => u.OtpExpiresAt).IsModified = true;
-        await _context.SaveChangesAsync(cancellationToken);
+        _userRepository.Update(user);
+        await _userRepository.SaveChangesAsync(cancellationToken);
 
         if (string.IsNullOrWhiteSpace(_sendGridOptions.OtpTemplateId))
         {
@@ -151,15 +144,10 @@ public class OtpService : IOtpService
 
     private void ClearPersistedOtp(User user)
     {
-        if (_context.Entry(user).State == EntityState.Detached)
-        {
-            _context.Attach(user);
-        }
-
+        _userRepository.Attach(user);
         user.OtpHash = null;
         user.OtpExpiresAt = null;
-        _context.Entry(user).Property(u => u.OtpHash).IsModified = true;
-        _context.Entry(user).Property(u => u.OtpExpiresAt).IsModified = true;
-        _context.SaveChanges();
+        _userRepository.Update(user);
+        _userRepository.SaveChangesAsync(CancellationToken.None).GetAwaiter().GetResult();
     }
 }

@@ -1,23 +1,19 @@
-using Microsoft.EntityFrameworkCore;
 using System.Linq;
-using SmartFleet.Data;
 using SmartFleet.Dtos;
 using SmartFleet.Models;
+using SmartFleet.Data.Repositories;
 
 namespace SmartFleet.Services;
 
-public class VehicleService(ApplicationDbContext context) : IVehicleService
+public class VehicleService(IVehicleRepository vehicleRepository, IUserRepository userRepository) : IVehicleService
 {
-    private readonly ApplicationDbContext _context = context;
+    private readonly IVehicleRepository _vehicleRepository = vehicleRepository;
+    private readonly IUserRepository _userRepository = userRepository;
     private static readonly TimeSpan StaleTelemetryThreshold = TimeSpan.FromMinutes(5);
 
     public async Task<IReadOnlyCollection<Vehicle>> GetAllAsync(CancellationToken cancellationToken)
     {
-        var vehicles = await _context.Vehicles
-            .Include(v => v.Driver)
-            .AsNoTracking()
-            .OrderByDescending(v => v.LastTelemetryAtUtc ?? v.UpdatedAt)
-            .ToListAsync(cancellationToken);
+        var vehicles = await _vehicleRepository.GetAllWithDriverAsync(cancellationToken);
 
         var staleThresholdUtc = DateTime.UtcNow - StaleTelemetryThreshold;
 
@@ -34,10 +30,7 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
 
     public async Task<Vehicle?> GetByIdAsync(int id, CancellationToken cancellationToken)
     {
-        return await _context.Vehicles
-            .Include(v => v.Driver)
-            .AsNoTracking()
-            .FirstOrDefaultAsync(v => v.Id == id, cancellationToken);
+        return await _vehicleRepository.GetByIdAsync(id, includeDriver: true, asTracking: false, cancellationToken);
     }
 
     public async Task<Vehicle> CreateAsync(VehicleCreateDto dto, CancellationToken cancellationToken)
@@ -76,17 +69,15 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
             UpdatedAt = DateTime.UtcNow
         };
 
-        _context.Vehicles.Add(vehicle);
-        await _context.SaveChangesAsync(cancellationToken);
+        await _vehicleRepository.AddAsync(vehicle, cancellationToken);
+        await _vehicleRepository.SaveChangesAsync(cancellationToken);
 
         return vehicle;
     }
 
     public async Task<Vehicle?> UpdateAsync(int id, VehicleUpdateDto dto, CancellationToken cancellationToken)
     {
-        var vehicle = await _context.Vehicles
-            .Include(v => v.Driver)
-            .FirstOrDefaultAsync(v => v.Id == id, cancellationToken);
+        var vehicle = await _vehicleRepository.GetByIdAsync(id, includeDriver: true, asTracking: true, cancellationToken);
 
         if (vehicle is null)
         {
@@ -150,22 +141,22 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
         vehicle.LastTelemetryAtUtc = dto.LastTelemetryAtUtc;
         vehicle.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _vehicleRepository.SaveChangesAsync(cancellationToken);
 
         return vehicle;
     }
 
     public async Task<bool> DeleteAsync(int id, CancellationToken cancellationToken)
     {
-        var vehicle = await _context.Vehicles.FirstOrDefaultAsync(v => v.Id == id, cancellationToken);
+        var vehicle = await _vehicleRepository.GetByIdAsync(id, includeDriver: false, asTracking: true, cancellationToken);
 
         if (vehicle is null)
         {
             return false;
         }
 
-        _context.Vehicles.Remove(vehicle);
-        await _context.SaveChangesAsync(cancellationToken);
+        _vehicleRepository.Remove(vehicle);
+        await _vehicleRepository.SaveChangesAsync(cancellationToken);
         return true;
     }
 
@@ -177,7 +168,7 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
         string? requestId,
         CancellationToken cancellationToken)
     {
-        var vehicle = await _context.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, cancellationToken);
+        var vehicle = await _vehicleRepository.GetByIdAsync(vehicleId, includeDriver: false, asTracking: true, cancellationToken);
         if (vehicle is null || stops.Count < 2)
         {
             return;
@@ -220,21 +211,19 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
         vehicle.Status = string.IsNullOrWhiteSpace(vehicle.Status) ? "pending_route_update" : vehicle.Status;
         vehicle.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _vehicleRepository.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<VehicleDriverAssignmentResult> AssignDriverAsync(int vehicleId, int userId, CancellationToken cancellationToken)
     {
-        var vehicle = await _context.Vehicles
-            .Include(v => v.Driver)
-            .FirstOrDefaultAsync(v => v.Id == vehicleId, cancellationToken);
+        var vehicle = await _vehicleRepository.GetByIdAsync(vehicleId, includeDriver: true, asTracking: true, cancellationToken);
 
         if (vehicle is null)
         {
             return VehicleDriverAssignmentResult.VehicleNotFound();
         }
 
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+        var user = await _userRepository.GetByIdAsync(userId, includeVehicle: false, asTracking: true, cancellationToken);
 
         if (user is null)
         {
@@ -262,17 +251,15 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
         vehicle.Driver = user;
         vehicle.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(cancellationToken);
-        await _context.Entry(vehicle).Reference(v => v.Driver).LoadAsync(cancellationToken);
+        await _vehicleRepository.SaveChangesAsync(cancellationToken);
+        await _vehicleRepository.LoadDriverAsync(vehicle, cancellationToken);
 
         return VehicleDriverAssignmentResult.Success(vehicle);
     }
 
     public async Task<VehicleDriverRemovalResult> RemoveDriverAsync(int vehicleId, CancellationToken cancellationToken)
     {
-        var vehicle = await _context.Vehicles
-            .Include(v => v.Driver)
-            .FirstOrDefaultAsync(v => v.Id == vehicleId, cancellationToken);
+        var vehicle = await _vehicleRepository.GetByIdAsync(vehicleId, includeDriver: true, asTracking: true, cancellationToken);
 
         if (vehicle is null)
         {
@@ -289,7 +276,7 @@ public class VehicleService(ApplicationDbContext context) : IVehicleService
         vehicle.Driver = null;
         vehicle.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _vehicleRepository.SaveChangesAsync(cancellationToken);
 
         return VehicleDriverRemovalResult.Success();
     }

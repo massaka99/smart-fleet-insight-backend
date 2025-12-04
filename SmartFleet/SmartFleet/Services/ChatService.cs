@@ -1,15 +1,19 @@
 using System.Collections.Generic;
 using System.Linq;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using SmartFleet.Data;
+using SmartFleet.Data.Repositories;
 using SmartFleet.Models.Chat;
 
 namespace SmartFleet.Services;
 
-public class ChatService(ApplicationDbContext context, ILogger<ChatService> logger, IChatNotifier notifier) : IChatService
+public class ChatService(
+    IChatRepository chatRepository,
+    IUserRepository userRepository,
+    ILogger<ChatService> logger,
+    IChatNotifier notifier) : IChatService
 {
-    private readonly ApplicationDbContext _context = context;
+    private readonly IChatRepository _chatRepository = chatRepository;
+    private readonly IUserRepository _userRepository = userRepository;
     private readonly ILogger<ChatService> _logger = logger;
     private readonly IChatNotifier _notifier = notifier;
 
@@ -17,19 +21,14 @@ public class ChatService(ApplicationDbContext context, ILogger<ChatService> logg
     {
         var (participantAId, participantBId) = ChatThread.NormalizeParticipants(userId1, userId2);
 
-        var thread = await _context.ChatThreads
-            .Include(t => t.ParticipantA)
-            .Include(t => t.ParticipantB)
-            .FirstOrDefaultAsync(t => t.ParticipantAId == participantAId && t.ParticipantBId == participantBId, cancellationToken);
+        var thread = await _chatRepository.GetThreadAsync(participantAId, participantBId, cancellationToken);
 
         if (thread is not null)
         {
             return (thread, false);
         }
 
-        var participants = await _context.Users
-            .Where(u => u.Id == participantAId || u.Id == participantBId)
-            .ToListAsync(cancellationToken);
+        var participants = await _userRepository.GetByIdsAsync(new[] { participantAId, participantBId }, cancellationToken);
 
         if (participants.Count != 2)
         {
@@ -46,21 +45,18 @@ public class ChatService(ApplicationDbContext context, ILogger<ChatService> logg
             ParticipantB = participants.Single(u => u.Id == participantBId)
         };
 
-        _context.ChatThreads.Add(thread);
+        await _chatRepository.AddThreadAsync(thread, cancellationToken);
 
         try
         {
-            await _context.SaveChangesAsync(cancellationToken);
+            await _chatRepository.SaveChangesAsync(cancellationToken);
             return (thread, true);
         }
-        catch (DbUpdateException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Potential concurrency race creating chat thread between {UserA} and {UserB}. Reloading existing thread.", participantAId, participantBId);
 
-            thread = await _context.ChatThreads
-                .Include(t => t.ParticipantA)
-                .Include(t => t.ParticipantB)
-                .FirstOrDefaultAsync(t => t.ParticipantAId == participantAId && t.ParticipantBId == participantBId, cancellationToken)
+            thread = await _chatRepository.GetThreadAsync(participantAId, participantBId, cancellationToken)
                 ?? throw new InvalidOperationException("Failed to resolve chat thread after concurrency conflict.");
 
             return (thread, false);
@@ -70,22 +66,7 @@ public class ChatService(ApplicationDbContext context, ILogger<ChatService> logg
     public async Task<IReadOnlyCollection<ChatMessage>> GetRecentMessagesAsync(int threadId, int take, DateTime? before, CancellationToken cancellationToken)
     {
         take = Math.Clamp(take, 1, 100);
-
-        var query = _context.ChatMessages
-            .Where(m => m.ThreadId == threadId);
-
-        if (before.HasValue)
-        {
-            query = query.Where(m => m.SentAt < before.Value);
-        }
-
-        return await query
-            .OrderByDescending(m => m.SentAt)
-            .Include(m => m.Sender)
-            .Include(m => m.Recipient)
-            .Take(take)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
+        return await _chatRepository.GetRecentMessagesAsync(threadId, take, before, cancellationToken);
     }
 
     public async Task<ChatMessage> SendMessageAsync(int senderId, int recipientId, string messageBody, CancellationToken cancellationToken)
@@ -118,13 +99,15 @@ public class ChatService(ApplicationDbContext context, ILogger<ChatService> logg
             Status = ChatMessageStatus.Sent
         };
 
-        _context.ChatMessages.Add(message);
+        await _chatRepository.AddMessageAsync(message, cancellationToken);
         thread.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _chatRepository.SaveChangesAsync(cancellationToken);
 
-        await _context.Entry(message).Reference(m => m.Sender).LoadAsync(cancellationToken);
-        await _context.Entry(message).Reference(m => m.Recipient).LoadAsync(cancellationToken);
+        message.Sender = await _userRepository.GetByIdAsync(senderId, includeVehicle: false, asTracking: false, cancellationToken)
+            ?? message.Sender;
+        message.Recipient = await _userRepository.GetByIdAsync(recipientId, includeVehicle: false, asTracking: false, cancellationToken)
+            ?? message.Recipient;
 
         await BroadcastAsync(() => _notifier.MessageSentAsync(message, cancellationToken));
 
@@ -133,7 +116,7 @@ public class ChatService(ApplicationDbContext context, ILogger<ChatService> logg
 
     public async Task<bool> MarkDeliveredAsync(int messageId, int recipientId, DateTime? deliveredAt, CancellationToken cancellationToken)
     {
-        var message = await _context.ChatMessages.FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken);
+        var message = await _chatRepository.GetMessageByIdAsync(messageId, cancellationToken);
 
         if (message is null || message.RecipientId != recipientId || message.Status == ChatMessageStatus.Failed)
         {
@@ -148,14 +131,14 @@ public class ChatService(ApplicationDbContext context, ILogger<ChatService> logg
         message.Status = ChatMessageStatus.Delivered;
         message.DeliveredAt = deliveredAt ?? DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _chatRepository.SaveChangesAsync(cancellationToken);
         await BroadcastAsync(() => _notifier.MessageDeliveredAsync(message, cancellationToken));
         return true;
     }
 
     public async Task<bool> MarkReadAsync(int messageId, int recipientId, DateTime? readAt, CancellationToken cancellationToken)
     {
-        var message = await _context.ChatMessages.FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken);
+        var message = await _chatRepository.GetMessageByIdAsync(messageId, cancellationToken);
 
         if (message is null || message.RecipientId != recipientId || message.Status == ChatMessageStatus.Failed)
         {
@@ -175,7 +158,7 @@ public class ChatService(ApplicationDbContext context, ILogger<ChatService> logg
             message.DeliveredAt = message.ReadAt;
         }
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _chatRepository.SaveChangesAsync(cancellationToken);
         await BroadcastAsync(() => _notifier.MessageReadAsync(message, cancellationToken));
         return true;
     }
@@ -203,9 +186,7 @@ public class ChatService(ApplicationDbContext context, ILogger<ChatService> logg
         var targetIds = new HashSet<int>(deliveredSet);
         targetIds.UnionWith(readSet);
 
-        var messages = await _context.ChatMessages
-            .Where(m => targetIds.Contains(m.Id))
-            .ToListAsync(cancellationToken);
+        var messages = await _chatRepository.GetMessagesByIdsAsync(targetIds.ToArray(), cancellationToken);
 
         if (messages.Count == 0)
         {
@@ -286,7 +267,7 @@ public class ChatService(ApplicationDbContext context, ILogger<ChatService> logg
             return;
         }
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _chatRepository.SaveChangesAsync(cancellationToken);
 
         foreach (var message in deliveredNotifications)
         {
