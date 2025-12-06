@@ -44,11 +44,11 @@ public class UserSessionTrackerTests
         var userId = 12;
         var sessionId = Guid.NewGuid();
 
-        tracker.TryBeginSession(userId, sessionId, DateTime.UtcNow.AddMilliseconds(20)).Should().BeTrue();
+        tracker.TryBeginSession(userId, sessionId, DateTime.UtcNow.AddMilliseconds(50)).Should().BeTrue();
 
-        tracker.RenewSession(userId, sessionId, DateTime.UtcNow.AddMilliseconds(200)).Should().BeTrue();
+        tracker.RenewSession(userId, sessionId, DateTime.UtcNow.AddSeconds(5)).Should().BeTrue();
 
-        await Task.Delay(80);
+        await Task.Delay(500);
 
         tracker.IsSessionActive(userId, sessionId).Should().BeTrue();
     }
