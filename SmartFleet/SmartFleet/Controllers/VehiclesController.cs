@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Text;
@@ -95,11 +96,36 @@ public class VehiclesController(
 
     [HttpGet("export")]
     [Authorize(Policy = "MapsAccess")]
-    public async Task<IActionResult> ExportVehicles([FromQuery] string? status, [FromQuery] string? query, CancellationToken cancellationToken)
+    public async Task<IActionResult> ExportVehicles(
+        [FromQuery] string? status,
+        [FromQuery] string? query,
+        [FromQuery] DateOnly? start,
+        [FromQuery] DateOnly? end,
+        [FromQuery] string? interval,
+        CancellationToken cancellationToken)
     {
         if (User.IsInRole(UserRole.Driver.ToString()))
         {
             return Forbid();
+        }
+
+        if ((start.HasValue && !end.HasValue) || (!start.HasValue && end.HasValue))
+        {
+            return BadRequest("Both start and end dates must be supplied for date filtering.");
+        }
+
+        DateTime? startUtc = null;
+        DateTime? endUtc = null;
+
+        if (start.HasValue && end.HasValue)
+        {
+            startUtc = start.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            endUtc = end.Value.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
+
+            if (startUtc > endUtc)
+            {
+                return BadRequest("Start date must be before or equal to end date.");
+            }
         }
 
         var vehicles = await _vehicleService.GetAllAsync(cancellationToken);
@@ -120,7 +146,19 @@ public class VehiclesController(
                 (!string.IsNullOrWhiteSpace(v.Brand) && v.Brand!.ToLowerInvariant().Contains(normalizedQuery)));
         }
 
-        var csv = BuildVehicleCsv(filtered);
+        if (startUtc.HasValue && endUtc.HasValue)
+        {
+            filtered = filtered.Where(v =>
+            {
+                var observedAt = v.LastTelemetryAtUtc ?? v.UpdatedAt;
+                return observedAt >= startUtc.Value && observedAt <= endUtc.Value;
+            });
+        }
+
+        var normalizedInterval = interval?.Trim().ToLowerInvariant();
+        var includeEmissionRollup = normalizedInterval == "month" || normalizedInterval == "monthly";
+
+        var csv = BuildVehicleCsv(filtered, startUtc, endUtc, includeEmissionRollup);
         var fileName = $"fleet-export-{DateTime.UtcNow:yyyyMMddHHmmss}.csv";
         return File(Encoding.UTF8.GetBytes(csv), "text/csv", fileName);
     }
@@ -289,21 +327,49 @@ public class VehiclesController(
         return fallbackSummary ?? string.Empty;
     }
 
-    private static string BuildVehicleCsv(IEnumerable<Vehicle> vehicles)
+    private static string BuildVehicleCsv(IEnumerable<Vehicle> vehicles, DateTime? startUtc, DateTime? endUtc, bool includeEmissionRollup)
     {
         var culture = CultureInfo.InvariantCulture;
-        var header = "licensePlate,status,routeSummary,fuelPercent,progressPercent,driver,etaMinutes,co2Kg";
+        const string delimiter = ";";
+        var headerColumns = new List<string>
+        {
+            "licensePlate",
+            "status",
+            "routeSummary",
+            "fuelPercent",
+            "progressPercent",
+            "driver",
+            "etaMinutes",
+            "co2Kg",
+            "distanceKm"
+        };
+
+        if (includeEmissionRollup)
+        {
+            headerColumns.Add("co2MaxKg");
+        }
+
+        if (startUtc.HasValue && endUtc.HasValue)
+        {
+            headerColumns.Add("periodStartUtc");
+            headerColumns.Add("periodEndUtc");
+        }
+
+        var header = string.Join(delimiter, headerColumns);
         var lines = vehicles.Select(v =>
         {
             var driver = v.Driver is null ? string.Empty : $"{v.Driver.FirstName} {v.Driver.LastName}".Trim();
             var etaMinutes = v.EtaSeconds > 0 ? Math.Round(v.EtaSeconds / 60.0, 0) : 0;
             var co2 = v.CO2Emission;
+            var distanceKm = v.DistanceTravelledM > 0 ? v.DistanceTravelledM / 1000.0 : 0;
+            var co2Max = includeEmissionRollup ? Math.Max(v.CO2Emission, 0) : (double?)null;
 
-            string Escape(string value) => value.Contains(',') || value.Contains('"')
-                ? $"\"{value.Replace("\"", "\"\"")}\""
+            string Escape(string value) => value.Contains(delimiter, StringComparison.Ordinal) || value.Contains('"')
+                ? $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\""
                 : value;
 
-            return string.Join(",",
+            var columns = new List<string>
+            {
                 Escape(v.LicensePlate ?? string.Empty),
                 Escape((v.Status ?? string.Empty).Trim()),
                 Escape(v.RouteSummary ?? string.Empty),
@@ -311,7 +377,22 @@ public class VehiclesController(
                 Math.Round(v.Progress * 100, 1).ToString(culture),
                 Escape(driver),
                 etaMinutes.ToString(culture),
-                Math.Round(co2, 2).ToString(culture));
+                Math.Round(co2, 2).ToString(culture),
+                Math.Round(distanceKm, 2).ToString(culture)
+            };
+
+            if (includeEmissionRollup && co2Max.HasValue)
+            {
+                columns.Add(Math.Round(co2Max.Value, 2).ToString(culture));
+            }
+
+            if (startUtc.HasValue && endUtc.HasValue)
+            {
+                columns.Add(startUtc.Value.ToString("yyyy-MM-ddTHH:mm:ssZ", culture));
+                columns.Add(endUtc.Value.ToString("yyyy-MM-ddTHH:mm:ssZ", culture));
+            }
+
+            return string.Join(delimiter, columns);
         });
 
         var builder = new StringBuilder();
