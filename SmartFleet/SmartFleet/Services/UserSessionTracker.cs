@@ -42,6 +42,8 @@ internal sealed class UserSessionTracker : IUserSessionTracker
                 return false;
             }
 
+            // Replace the existing session record to ensure the refreshed expiry is stored under both keys.
+            RemoveSession(sessionId);
             var updated = existing with { ExpiresAt = expiresAt };
             StoreSession(updated);
             return true;
